@@ -18,6 +18,8 @@ env:
 
 addons:
   apt:
+    sources:
+      - ubuntu-toolchain-r-test
     packages:
       - bison
       - build-essential
@@ -45,13 +47,13 @@ addons:
       - valac
       - xutils-dev
       - yasm
+      - g++-4.9
+      - gcc-4.9
 
 before_install:
-  - sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
-  - sudo apt-get update -q
-  - sudo apt-get install gcc-4.9 -y
   - export CXX="g++-4.9" CC="gcc-4.9"
-  - CXX --version
+  - sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-4.9 60 --slave /usr/bin/g++ g++ /usr/bin/g++-4.9
+  - sudo update-alternatives --config gcc
 
 matrix:
   fast_finish: true

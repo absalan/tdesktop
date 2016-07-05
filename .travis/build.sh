@@ -7,6 +7,7 @@ REPO="$PWD"
 QT_VERSION=5.6.0
 QT_PATH="$REPO/build/qt"
 UPSTREAM="$REPO/upstream"
+EXTERNAL="$REPO/external"
 
 run() {    
     g++ --version
@@ -48,7 +49,7 @@ downloadLibs() {
 
 build() {
 # libxkbcommon
-cd "$REPO/external/libxkbcommon"
+cd "$EXTERNAL/libxkbcommon"
 ./autogen.sh \
 	--prefix='/usr/local'
 make $MAKE_ARGS
@@ -56,7 +57,7 @@ sudo make install
 sudo ldconfig
 
 # ffmpeg
-cd "$REPO/external/ffmpeg"
+cd "$EXTERNAL/ffmpeg"
 ./configure \
 	--prefix='/usr/local' \
 	--disable-debug \
@@ -123,7 +124,7 @@ sudo make install
 sudo ldconfig
 
 # openal_soft
-cd "$REPO/external/openal-soft/build"
+cd "$EXTERNAL/openal-soft/build"
 cmake \
     -D CMAKE_INSTALL_PREFIX=/usr/local \
     -D CMAKE_BUILD_TYPE=Release \
@@ -134,7 +135,7 @@ sudo make install
 sudo ldconfig
 
 # qtbase
-cd "$REPO/external/qt${QT_VERSION}/qtbase"
+cd "$EXTERNAL/qt${QT_VERSION}/qtbase"
 git apply "$UPSTREAM/Telegram/Patches/qtbase_$(echo ${QT_VERSION} | sed -e "s/\./_/g").diff"
 cd ..
 ./configure -prefix "$QT_PATH" -release -opensource -confirm-license -qt-zlib \
@@ -147,8 +148,8 @@ sudo make install
 export PATH="$QT_PATH/bin:$PATH"
 
 # breakpad
-ln -s -f "$REPO/external/linux-syscall-support" "$REPO/external/breakpad/src/third_party/lss"
-cd "$REPO/external/breakpad"
+ln -s -f "$EXTERNAL/linux-syscall-support" "$EXTERNAL/breakpad/src/third_party/lss"
+cd "$EXTERNAL/breakpad"
 ./configure
 make $MAKE_ARGS
 
@@ -156,6 +157,7 @@ make $MAKE_ARGS
     sed -i 's/CUSTOM_API_ID//g' "$UPSTREAM/Telegram/Telegram.pro"
 	sed -i 's,LIBS += /usr/local/lib/libxkbcommon.a,,g' "$UPSTREAM/Telegram/Telegram.pro"
 	sed -i 's,LIBS += /usr/local/lib/libz.a,LIBS += -lz,g' "$UPSTREAM/Telegram/Telegram.pro"
+    sed -i "s,\..*/Libraries/breakpad/,$EXTERNAL/breakpad/,g" "$UPSTREAM/Telegram/Telegram.pro"
 
 	local options=""
 
@@ -191,6 +193,8 @@ make $MAKE_ARGS
 	info_msg "Build options: ${options}"
 
 	echo -e "${options}" >> "$UPSTREAM/Telegram/Telegram.pro"
+    
+    cat "$UPSTREAM/Telegram/Telegram.pro"
 
     buildTelegram
 }
