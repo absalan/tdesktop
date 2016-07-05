@@ -1,65 +1,161 @@
 #!/bin/bash
-# Installs libs and compiles tdesktop
 
-run() {
-	info_msg "Build version: ${BUILD_VERSION}"
+set -e
 
-	downloadLibs
-	prepare
-	build
-	check
+REPO="$PWD"
+[[ ! $MAKE_ARGS ]] && MAKE_ARGS="--quiet -j4"
+QT_VERSION=5.6.0
+QT_PATH="$REPO/build/qt"
+UPSTREAM="$REPO/upstream"
+
+run() {    
+    g++ --version
+    
+    # Move files to subdir
+    cd ..
+    mv tdesktop tdesktop2
+    mkdir tdesktop
+    mv tdesktop2 "$UPSTREAM"
+
+    downloadLibs
+    build
+    check
 }
 
+# install
 downloadLibs() {
-	travis_fold_start "download_libs"
-	# Move telegram project to subfolder
-	mkdir tdesktop
-	mv -f Telegram tdesktop
-
-	# Download libraries
-	info_msg "QT-Version: ${_qtver}, SRC-Dir: ${srcdir}"
-
-	echo -e "Clone Qt\n"
-	git clone git://code.qt.io/qt/qt5.git qt${_qtver}
-	cd qt${_qtver}
-	git checkout $(echo ${_qtver} | sed -e "s/\..$//")
+    cd "$REPO"
+    mkdir external && cd external
+    
+	echo -e "Clone Qt ${QT_VERSION}\n"
+	git clone git://code.qt.io/qt/qt5.git qt${QT_VERSION}
+	cd qt${QT_VERSION}
+	git checkout $(echo ${QT_VERSION} | sed -e "s/\..$//")
 	perl init-repository --module-subset=qtbase,qtimageformats
-	git checkout v${_qtver}
-	cd qtbase && git checkout v${_qtver} && cd ..
-	cd qtimageformats && git checkout v${_qtver} && cd ..
+	git checkout v${QT_VERSION}
+	cd qtbase && git checkout v${QT_VERSION} && cd ..
+	cd qtimageformats && git checkout v${QT_VERSION} && cd ..
 	cd ..
 
-	echo -e "Clone Breakpad\n"
-	git clone https://chromium.googlesource.com/breakpad/breakpad breakpad
-
-	echo -e "Clone Linux Syscall Support\n"
-	git clone https://chromium.googlesource.com/linux-syscall-support breakpad-lss
-
-	echo -e "Lets view the folder content\n"
-	ls
-	travis_fold_end "download_libs"
+    git clone          https://chromium.googlesource.com/breakpad/breakpad
+    git clone          https://git.mel.vin/mirror/dee.git
+    git clone          https://git.ffmpeg.org/ffmpeg.git
+    git clone          https://git.mel.vin/mirror/libunity.git
+    git clone          https://github.com/xkbcommon/libxkbcommon.git
+    git clone          https://chromium.googlesource.com/linux-syscall-support
+    git clone          https://github.com/kcat/openal-soft.git
 }
 
-prepare() {
-	travis_fold_start "prepare"
-	start_msg "Preparing the libraries..."
+build() {
+# libxkbcommon
+cd "$REPO/external/libxkbcommon"
+./autogen.sh \
+	--prefix='/usr/local'
+make $MAKE_ARGS
+sudo make install
+sudo ldconfig
 
-	cd "$srcdir/tdesktop"
+# ffmpeg
+cd "$REPO/external/ffmpeg"
+./configure \
+	--prefix='/usr/local' \
+	--disable-debug \
+	--disable-programs \
+	--disable-doc \
+	--disable-everything \
+	--enable-gpl \
+	--enable-version3 \
+	--enable-libopus \
+	--enable-decoder=aac \
+	--enable-decoder=aac_latm \
+	--enable-decoder=aasc \
+	--enable-decoder=flac \
+	--enable-decoder=gif \
+	--enable-decoder=h264 \
+	--enable-decoder=h264_vdpau \
+	--enable-decoder=mp1 \
+	--enable-decoder=mp1float \
+	--enable-decoder=mp2 \
+	--enable-decoder=mp2float \
+	--enable-decoder=mp3 \
+	--enable-decoder=mp3adu \
+	--enable-decoder=mp3adufloat \
+	--enable-decoder=mp3float \
+	--enable-decoder=mp3on4 \
+	--enable-decoder=mp3on4float \
+	--enable-decoder=mpeg4 \
+	--enable-decoder=mpeg4_vdpau \
+	--enable-decoder=msmpeg4v2 \
+	--enable-decoder=msmpeg4v3 \
+	--enable-decoder=opus \
+	--enable-decoder=vorbis \
+	--enable-decoder=wavpack \
+	--enable-decoder=wmalossless \
+	--enable-decoder=wmapro \
+	--enable-decoder=wmav1 \
+	--enable-decoder=wmav2 \
+	--enable-decoder=wmavoice \
+	--enable-encoder=libopus \
+	--enable-hwaccel=h264_vaapi \
+	--enable-hwaccel=h264_vdpau \
+	--enable-hwaccel=mpeg4_vaapi \
+	--enable-hwaccel=mpeg4_vdpau \
+	--enable-parser=aac \
+	--enable-parser=aac_latm \
+	--enable-parser=flac \
+	--enable-parser=h264 \
+	--enable-parser=mpeg4video \
+	--enable-parser=mpegaudio \
+	--enable-parser=opus \
+	--enable-parser=vorbis \
+	--enable-demuxer=aac \
+	--enable-demuxer=flac \
+	--enable-demuxer=gif \
+	--enable-demuxer=h264 \
+	--enable-demuxer=mov \
+	--enable-demuxer=mp3 \
+	--enable-demuxer=ogg \
+	--enable-demuxer=wav \
+	--enable-muxer=ogg \
+	--enable-muxer=opus
+make $MAKE_ARGS
+sudo make install
+sudo ldconfig
 
-	mkdir -p "$srcdir/Libraries"
+# openal_soft
+cd "$REPO/external/openal-soft/build"
+cmake \
+    -D CMAKE_INSTALL_PREFIX=/usr/local \
+    -D CMAKE_BUILD_TYPE=Release \
+    -D LIBTYPE=STATIC \
+    ..
+make $MAKE_ARGS
+sudo make install
+sudo ldconfig
 
-	ln -s "$srcdir/qt${_qtver}" "$srcdir/Libraries/qt${_qtver}"
-	cd "$srcdir/Libraries/qt${_qtver}/qtbase"
-	git apply "$srcdir/tdesktop/Telegram/Patches/qtbase_$(echo ${_qtver} | sed -e "s/\./_/g").diff"
+# qtbase
+cd "$REPO/external/qt${QT_VERSION}/qtbase"
+git apply "$UPSTREAM/Telegram/Patches/qtbase_$(echo ${QT_VERSION} | sed -e "s/\./_/g").diff"
+cd ..
+./configure -prefix "$QT_PATH" -release -opensource -confirm-license -qt-zlib \
+                -qt-libpng -qt-libjpeg -qt-freetype -qt-harfbuzz -qt-pcre -qt-xcb \
+                -qt-xkbcommon-x11 -no-opengl -static -nomake examples -nomake tests \
+                -dbus-runtime -openssl-linked -no-gstreamer -no-mtdev -no-xinput2 -no-gtkstyle -no-glib # <- Not sure about these
+make $MAKE_ARGS
+sudo make install
 
-	if [ ! -h "$srcdir/Libraries/breakpad" ]; then
-		ln -s "$srcdir/breakpad" "$srcdir/Libraries/breakpad"
-		ln -s "$srcdir/breakpad-lss" "$srcdir/Libraries/breakpad/src/third_party/lss"
-	fi
+export PATH="$QT_PATH/bin:$PATH"
 
-	sed -i 's/CUSTOM_API_ID//g' "$srcdir/tdesktop/Telegram/Telegram.pro"
-	sed -i 's,LIBS += /usr/local/lib/libxkbcommon.a,,g' "$srcdir/tdesktop/Telegram/Telegram.pro"
-	sed -i 's,LIBS += /usr/local/lib/libz.a,LIBS += -lz,g' "$srcdir/tdesktop/Telegram/Telegram.pro"
+# breakpad
+ln -s -f "$REPO/external/linux-syscall-support" "$REPO/external/breakpad/src/third_party/lss"
+cd "$REPO/external/breakpad"
+./configure
+make $MAKE_ARGS
+
+# patch telegram
+    sed -i 's/CUSTOM_API_ID//g' "$UPSTREAM/Telegram/Telegram.pro"
+	sed -i 's,LIBS += /usr/local/lib/libxkbcommon.a,,g' "$UPSTREAM/Telegram/Telegram.pro"
+	sed -i 's,LIBS += /usr/local/lib/libz.a,LIBS += -lz,g' "$UPSTREAM/Telegram/Telegram.pro"
 
 	local options=""
 
@@ -94,67 +190,47 @@ prepare() {
 
 	info_msg "Build options: ${options}"
 
-	echo -e "${options}" >> "$srcdir/tdesktop/Telegram/Telegram.pro"
+	echo -e "${options}" >> "$UPSTREAM/Telegram/Telegram.pro"
 
-	success_msg "Prepare done! :)"
-	travis_fold_end "prepare"
+    buildTelegram
 }
 
-build() {
-	start_msg "Building the projects..."
-
-	info_msg "Build patched Qt"
-	# Build patched Qt
-	cd "$srcdir/Libraries/qt${_qtver}"
-	./configure -prefix "$srcdir/qt" -release -opensource -confirm-license -qt-zlib \
-	            -qt-libpng -qt-libjpeg -qt-freetype -qt-harfbuzz -qt-pcre -qt-xcb \
-	            -qt-xkbcommon-x11 -no-opengl -no-gtkstyle -static -nomake examples -nomake tests
-	make --silent -j4
-	make --silent -j4 install
-
-	export PATH="$srcdir/qt/bin:$PATH"
-
-	info_msg "Build breakpad"
-	# Build breakpad
-	cd "$srcdir/Libraries/breakpad"
-	./configure
-	make --silent -j4
-
+buildTelegram() {
 	info_msg "Build codegen_style"
 	# Build codegen_style
-	mkdir -p "$srcdir/tdesktop/Linux/obj/codegen_style/Debug"
-	cd "$srcdir/tdesktop/Linux/obj/codegen_style/Debug"
-	qmake QT_TDESKTOP_PATH=${srcdir}/qt QT_TDESKTOP_VERSION=${_qtver} CONFIG+=debug "../../../../Telegram/build/qmake/codegen_style/codegen_style.pro"
-	make --silent -j4
+	mkdir -p "$UPSTREAM/Linux/obj/codegen_style/Debug"
+	cd "$UPSTREAM/Linux/obj/codegen_style/Debug"
+	qmake QT_TDESKTOP_PATH=${QT_PATH} QT_TDESKTOP_VERSION=${QT_VERSION} CONFIG+=debug "../../../../Telegram/build/qmake/codegen_style/codegen_style.pro"
+	make $MAKE_ARGS
 
 	info_msg "Build codegen_numbers"
 	# Build codegen_numbers
-	mkdir -p "$srcdir/tdesktop/Linux/obj/codegen_numbers/Debug"
-	cd "$srcdir/tdesktop/Linux/obj/codegen_numbers/Debug"
-	qmake QT_TDESKTOP_PATH=${srcdir}/qt QT_TDESKTOP_VERSION=${_qtver} CONFIG+=debug "../../../../Telegram/build/qmake/codegen_numbers/codegen_numbers.pro"
-	make --silent -j4
+	mkdir -p "$UPSTREAM/Linux/obj/codegen_numbers/Debug"
+	cd "$UPSTREAM/Linux/obj/codegen_numbers/Debug"
+	qmake QT_TDESKTOP_PATH=${QT_PATH} QT_TDESKTOP_VERSION=${QT_VERSION} CONFIG+=debug "../../../../Telegram/build/qmake/codegen_numbers/codegen_numbers.pro"
+	make $MAKE_ARGS
 
 	info_msg "Build MetaLang"
 	# Build MetaLang
-	mkdir -p "$srcdir/tdesktop/Linux/DebugIntermediateLang"
-	cd "$srcdir/tdesktop/Linux/DebugIntermediateLang"
-	qmake QT_TDESKTOP_PATH=${srcdir}/qt QT_TDESKTOP_VERSION=${_qtver} CONFIG+=debug "../../Telegram/MetaLang.pro"
-	make --silent -j4
+	mkdir -p "$UPSTREAM/Linux/DebugIntermediateLang"
+	cd "$UPSTREAM/Linux/DebugIntermediateLang"
+	qmake QT_TDESKTOP_PATH=${QT_PATH} QT_TDESKTOP_VERSION=${QT_VERSION} CONFIG+=debug "../../Telegram/MetaLang.pro"
+	make $MAKE_ARGS
 
 	info_msg "Build Telegram Desktop"
 	# Build Telegram Desktop
-	mkdir -p "$srcdir/tdesktop/Linux/DebugIntermediate"
-	cd "$srcdir/tdesktop/Linux/DebugIntermediate"
+	mkdir -p "$UPSTREAM/Linux/DebugIntermediate"
+	cd "$UPSTREAM/Linux/DebugIntermediate"
 
 	./../codegen/Debug/codegen_style "-I./../../Telegram/Resources" "-I./../../Telegram/SourceFiles" "-o./GeneratedFiles/styles" all_files.style --rebuild
 	./../codegen/Debug/codegen_numbers "-o./GeneratedFiles" "./../../Telegram/Resources/numbers.txt"
 	./../DebugLang/MetaLang -lang_in ./../../Telegram/Resources/langs/lang.strings -lang_out ./GeneratedFiles/lang_auto
-	qmake QT_TDESKTOP_PATH=${srcdir}/qt QT_TDESKTOP_VERSION=${_qtver} CONFIG+=debug "../../Telegram/Telegram.pro"
-	make -j4
+	qmake QT_TDESKTOP_PATH=${QT_PATH} QT_TDESKTOP_VERSION=${QT_VERSION} CONFIG+=debug "../../Telegram/Telegram.pro"
+	make $MAKE_ARGS
 }
 
 check() {
-	local filePath="$srcdir/tdesktop/Linux/Debug/Telegram"
+	local filePath="$UPSTREAM/Linux/Debug/Telegram"
 	if test -f "$filePath"; then
 		success_msg "Build successful done! :)"
 
