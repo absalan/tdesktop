@@ -141,7 +141,7 @@ cd ..
 ./configure -prefix "$QT_PATH" -release -opensource -confirm-license -qt-zlib \
                 -qt-libpng -qt-libjpeg -qt-freetype -qt-harfbuzz -qt-pcre -qt-xcb \
                 -qt-xkbcommon-x11 -no-opengl -static -nomake examples -nomake tests \
-                -dbus-runtime -openssl-linked -no-gstreamer -no-mtdev -no-xinput2 -no-gtkstyle -no-glib # <- Not sure about these
+                -dbus-runtime -openssl-linked -no-gstreamer -no-mtdev # <- Not sure about these
 make $MAKE_ARGS
 sudo make install
 
