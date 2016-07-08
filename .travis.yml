@@ -3,6 +3,10 @@ dist: trusty
 
 language: cpp
 
+cache:
+  directories:
+  - $HOME/travisCacheDir
+
 env:
   global:
    # GitHub auth token (GH_AUTH_TOKEN)
@@ -28,6 +32,8 @@ addons:
       - dpatch
       - equivs
       - fakeroot
+      - g++-4.9
+      - gcc-4.9
       - git
       - gnome-common
       - gobject-introspection
@@ -42,18 +48,19 @@ addons:
       - libunity-dev
       - libva-dev
       - libxcb-xkb-dev
+      - libxkbcommon-x11-dev
       - lintian
       - quilt
       - valac
       - xutils-dev
       - yasm
-      - g++-4.9
-      - gcc-4.9
+      - tree
 
 before_install:
   - export CXX="g++-4.9" CC="gcc-4.9"
   - sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-4.9 60 --slave /usr/bin/g++ g++ /usr/bin/g++-4.9
   - sudo update-alternatives --config gcc
+  - g++ --version
 
 matrix:
   fast_finish: true

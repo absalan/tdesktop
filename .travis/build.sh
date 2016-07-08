@@ -8,35 +8,44 @@ QT_VERSION=5.6.0
 QT_PATH="$REPO/build/qt"
 UPSTREAM="$REPO/upstream"
 EXTERNAL="$REPO/external"
+CACHE="$HOME/travisCacheDir"
 
-run() {    
-    g++ --version
-    
+run() {
     # Move files to subdir
     cd ..
     mv tdesktop tdesktop2
     mkdir tdesktop
     mv tdesktop2 "$UPSTREAM"
 
+    checkCache
     downloadLibs
     build
     check
+}
+
+checkCache() {
+    if [ ! -d "$CACHE" ]; then
+        mkdir -p "$CACHE"
+    fi
+    
+    tree -a "$CACHE"
+    
+    local CFILE="test.txt"
+    
+    if [ ! -f "$CACHE/$CFILE" ]; then
+        info_msg "Creating cache file"
+        touch "$CACHE/$CFILE"
+        echo "TEST :)" > "$CACHE/$CFILE"
+    else
+        info_msg "Reading cache file"
+        cat "$CACHE/$CFILE"
+    fi
 }
 
 # install
 downloadLibs() {
     cd "$REPO"
     mkdir external && cd external
-    
-	echo -e "Clone Qt ${QT_VERSION}\n"
-	git clone git://code.qt.io/qt/qt5.git qt${QT_VERSION}
-	cd qt${QT_VERSION}
-	git checkout $(echo ${QT_VERSION} | sed -e "s/\..$//")
-	perl init-repository --module-subset=qtbase,qtimageformats
-	git checkout v${QT_VERSION}
-	cd qtbase && git checkout v${QT_VERSION} && cd ..
-	cd qtimageformats && git checkout v${QT_VERSION} && cd ..
-	cd ..
 
     git clone          https://chromium.googlesource.com/breakpad/breakpad
     git clone          https://git.mel.vin/mirror/dee.git
@@ -134,18 +143,8 @@ make $MAKE_ARGS
 sudo make install
 sudo ldconfig
 
-# qtbase
-cd "$EXTERNAL/qt${QT_VERSION}/qtbase"
-git apply "$UPSTREAM/Telegram/Patches/qtbase_$(echo ${QT_VERSION} | sed -e "s/\./_/g").diff"
-cd ..
-./configure -prefix "$QT_PATH" -release -opensource -confirm-license -qt-zlib \
-                -qt-libpng -qt-libjpeg -qt-freetype -qt-harfbuzz -qt-pcre -qt-xcb \
-                -qt-xkbcommon-x11 -no-opengl -static -nomake examples -nomake tests \
-                -dbus-runtime -openssl-linked -no-gstreamer -no-mtdev # <- Not sure about these
-make $MAKE_ARGS
-sudo make install
-
-export PATH="$QT_PATH/bin:$PATH"
+    # qtbase
+    buildCustomQt
 
 # breakpad
 ln -s -f "$EXTERNAL/linux-syscall-support" "$EXTERNAL/breakpad/src/third_party/lss"
@@ -155,9 +154,12 @@ make $MAKE_ARGS
 
 # patch telegram
     sed -i 's/CUSTOM_API_ID//g' "$UPSTREAM/Telegram/Telegram.pro"
+    sed -i 's,/usr/local/lib/libz.a,-lz,g' "$UPSTREAM/Telegram/Telegram.pro"
+    sed -i 's/-llzma/-l:liblzma.a/g' "$UPSTREAM/Telegram/Telegram.pro"
+    sed -i 's/-lopus/-l:libopus.a/g' "$UPSTREAM/Telegram/Telegram.pro"
+    sed -i "s,\..*/Libraries/breakpad/,$EXTERNAL/breakpad/,g" "$UPSTREAM/Telegram/Telegram.pro"
 	sed -i 's,LIBS += /usr/local/lib/libxkbcommon.a,,g' "$UPSTREAM/Telegram/Telegram.pro"
 	sed -i 's,LIBS += /usr/local/lib/libz.a,LIBS += -lz,g' "$UPSTREAM/Telegram/Telegram.pro"
-    sed -i "s,\..*/Libraries/breakpad/,$EXTERNAL/breakpad/,g" "$UPSTREAM/Telegram/Telegram.pro"
 
 	local options=""
 
@@ -185,18 +187,70 @@ make $MAKE_ARGS
 		options+="\nDEFINES += TDESKTOP_DISABLE_UNITY_INTEGRATION"
 	fi
 
-	options+='\nINCLUDEPATH += "/usr/lib/glib-2.0/include"'
-	options+='\nINCLUDEPATH += "/usr/lib/gtk-2.0/include"'
+	options+='\nINCLUDEPATH += "/usr/lib/x86_64-linux-gnu/glib-2.0/include"'
+	options+='\nINCLUDEPATH += "/usr/lib/x86_64-linux-gnu/gtk-2.0/include"'
 	options+='\nINCLUDEPATH += "/usr/include/opus"'
-	options+='\nLIBS += -lcrypto -lssl'
+	options+='\nINCLUDEPATH += "/usr/local/include/dee-1.0"'
+	options+='\nLIBS += -lcrypto -lssl -l:libexpat.a'
 
 	info_msg "Build options: ${options}"
 
 	echo -e "${options}" >> "$UPSTREAM/Telegram/Telegram.pro"
-    
+
     cat "$UPSTREAM/Telegram/Telegram.pro"
 
     buildTelegram
+}
+
+buildCustomQt() {
+    local QT_CACHE="$CACHE/qtPatched"
+    local QT_CACHE_FILE="$QT_CACHE/.cache.txt"
+    
+    rm "$QT_CACHE_FILE"
+    
+    tree "$CACHE"
+
+    if [ ! -d "$QT_CACHE" ]; then
+        mkdir -p "$QT_CACHE"
+    fi
+
+    if [ ! -d "$QT_PATH" ]; then
+        mkdir -p "$QT_PATH"
+    fi
+
+    ln -sf "$QT_CACHE" "$QT_PATH"
+
+    if [ -f "$QT_CACHE_FILE" ]; then
+        info_msg "Using cached patched qt"
+        return
+    fi
+
+    info_msg "Downloading and building patched qt"
+
+    cd "$EXTERNAL"
+    echo -e "Clone Qt ${QT_VERSION}\n"
+    git clone git://code.qt.io/qt/qt5.git qt${QT_VERSION}
+    cd qt${QT_VERSION}
+    git checkout "$(echo ${QT_VERSION} | sed -e s/\..$//)"
+    perl init-repository --module-subset=qtbase,qtimageformats
+    git checkout v${QT_VERSION}
+    cd qtbase && git checkout v${QT_VERSION} && cd ..
+    cd qtimageformats && git checkout v${QT_VERSION} && cd ..
+    cd ..
+
+    cd "$EXTERNAL/qt${QT_VERSION}/qtbase"
+    git apply "$UPSTREAM/Telegram/Patches/qtbase_${QT_VERSION//\./_}.diff"
+    cd ..
+    ./configure -prefix "$QT_PATH" -release -opensource -confirm-license -qt-zlib \
+                -qt-libpng -qt-libjpeg -qt-freetype -qt-harfbuzz -qt-pcre -qt-xcb \
+                -qt-xkbcommon-x11 -no-opengl -static -nomake examples -nomake tests \
+                -dbus-runtime -openssl-linked -no-gstreamer -no-mtdev # <- Not sure about these
+    make $MAKE_ARGS
+    sudo make install
+
+    export PATH="$QT_PATH/bin:$PATH"
+        
+    sudo touch "$QT_CACHE_FILE"
 }
 
 buildTelegram() {
@@ -204,21 +258,21 @@ buildTelegram() {
 	# Build codegen_style
 	mkdir -p "$UPSTREAM/Linux/obj/codegen_style/Debug"
 	cd "$UPSTREAM/Linux/obj/codegen_style/Debug"
-	qmake QT_TDESKTOP_PATH=${QT_PATH} QT_TDESKTOP_VERSION=${QT_VERSION} CONFIG+=debug "../../../../Telegram/build/qmake/codegen_style/codegen_style.pro"
+	qmake QT_TDESKTOP_PATH="${QT_PATH}" QT_TDESKTOP_VERSION=${QT_VERSION} CONFIG+=debug "../../../../Telegram/build/qmake/codegen_style/codegen_style.pro"
 	make $MAKE_ARGS
 
 	info_msg "Build codegen_numbers"
 	# Build codegen_numbers
 	mkdir -p "$UPSTREAM/Linux/obj/codegen_numbers/Debug"
 	cd "$UPSTREAM/Linux/obj/codegen_numbers/Debug"
-	qmake QT_TDESKTOP_PATH=${QT_PATH} QT_TDESKTOP_VERSION=${QT_VERSION} CONFIG+=debug "../../../../Telegram/build/qmake/codegen_numbers/codegen_numbers.pro"
+	qmake QT_TDESKTOP_PATH="${QT_PATH}" QT_TDESKTOP_VERSION=${QT_VERSION} CONFIG+=debug "../../../../Telegram/build/qmake/codegen_numbers/codegen_numbers.pro"
 	make $MAKE_ARGS
 
 	info_msg "Build MetaLang"
 	# Build MetaLang
 	mkdir -p "$UPSTREAM/Linux/DebugIntermediateLang"
 	cd "$UPSTREAM/Linux/DebugIntermediateLang"
-	qmake QT_TDESKTOP_PATH=${QT_PATH} QT_TDESKTOP_VERSION=${QT_VERSION} CONFIG+=debug "../../Telegram/MetaLang.pro"
+	qmake QT_TDESKTOP_PATH="${QT_PATH}" QT_TDESKTOP_VERSION=${QT_VERSION} CONFIG+=debug "../../Telegram/MetaLang.pro"
 	make $MAKE_ARGS
 
 	info_msg "Build Telegram Desktop"
@@ -229,7 +283,7 @@ buildTelegram() {
 	./../codegen/Debug/codegen_style "-I./../../Telegram/Resources" "-I./../../Telegram/SourceFiles" "-o./GeneratedFiles/styles" all_files.style --rebuild
 	./../codegen/Debug/codegen_numbers "-o./GeneratedFiles" "./../../Telegram/Resources/numbers.txt"
 	./../DebugLang/MetaLang -lang_in ./../../Telegram/Resources/langs/lang.strings -lang_out ./GeneratedFiles/lang_auto
-	qmake QT_TDESKTOP_PATH=${QT_PATH} QT_TDESKTOP_VERSION=${QT_VERSION} CONFIG+=debug "../../Telegram/Telegram.pro"
+	qmake QT_TDESKTOP_PATH="${QT_PATH}" QT_TDESKTOP_VERSION=${QT_VERSION} CONFIG+=debug "../../Telegram/Telegram.pro"
 	make $MAKE_ARGS
 }
 
