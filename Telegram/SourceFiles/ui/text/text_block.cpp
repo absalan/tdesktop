@@ -1,25 +1,13 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#include "stdafx.h"
 #include "ui/text/text_block.h"
+
+#include "core/crash_reports.h"
 
 // COPIED FROM qtextlayout.cpp AND MODIFIED
 namespace {
@@ -177,7 +165,6 @@ public:
 		int end = 0;
 		lbh.logClusters = eng->layoutData->logClustersPtr;
 
-		block->_lpadding = 0;
 		block->_words.clear();
 
 		int wordStart = lbh.currentPosition;
@@ -213,11 +200,10 @@ public:
 						current, lbh.logClusters, lbh.glyphs);
 
 				if (block->_words.isEmpty()) {
-					block->_lpadding = lbh.spaceData.textWidth;
-				} else {
-					block->_words.back().add_rpadding(lbh.spaceData.textWidth);
-					block->_width += lbh.spaceData.textWidth;
+					block->_words.push_back(TextWord(wordStart + blockFrom, lbh.tmpData.textWidth, -lbh.negativeRightBearing()));
 				}
+				block->_words.back().add_rpadding(lbh.spaceData.textWidth);
+				block->_width += lbh.spaceData.textWidth;
 				lbh.spaceData.length = 0;
 				lbh.spaceData.textWidth = 0;
 
@@ -271,9 +257,7 @@ public:
 			if (lbh.currentPosition == end)
 				newItem = item + 1;
 		}
-		if (block->_words.isEmpty()) {
-			block->_rpadding = 0;
-		} else {
+		if (!block->_words.isEmpty()) {
 			block->_rpadding = block->_words.back().f_rpadding();
 			block->_width -= block->_rpadding;
 			block->_words.squeeze();
@@ -300,12 +284,12 @@ QFixed ITextBlock::f_rbearing() const {
 	return (type() == TextBlockTText) ? static_cast<const TextBlock*>(this)->real_f_rbearing() : 0;
 }
 
-TextBlock::TextBlock(const style::font &font, const QString &str, QFixed minResizeWidth, uint16 from, uint16 length, uchar flags, const style::color &color, uint16 lnkIndex) : ITextBlock(font, str, from, length, flags, color, lnkIndex) {
+TextBlock::TextBlock(const style::font &font, const QString &str, QFixed minResizeWidth, uint16 from, uint16 length, uchar flags, uint16 lnkIndex) : ITextBlock(font, str, from, length, flags, lnkIndex) {
 	_flags |= ((TextBlockTText & 0x0F) << 8);
 	if (length) {
 		style::font blockFont = font;
 		if (!flags && lnkIndex) {
-			// should use textStyle lnkFlags somehow... not supported
+			// should use TextStyle lnkFlags somehow... not supported
 		}
 
 		if ((flags & TextBlockFPre) || (flags & TextBlockFCode)) {
@@ -329,33 +313,35 @@ TextBlock::TextBlock(const style::font &font, const QString &str, QFixed minResi
 			}
 		}
 
-		QString part = str.mid(_from, length);
+		const auto part = str.mid(_from, length);
+
+		// Attempt to catch a crash in text processing
+		CrashReports::SetAnnotationRef("CrashString", &part);
+
 		QStackTextEngine engine(part, blockFont->f);
-		engine.itemize();
-
-		QTextLayout layout(&engine);
-		layout.beginLayout();
-		layout.createLine();
-
-		bool logCrashString = (rand_value<uchar>() % 4 == 1);
-		if (logCrashString) {
-			SignalHandlers::setCrashAnnotationRef("CrashString", &str);
-		}
 		BlockParser parser(&engine, this, minResizeWidth, _from, part);
-		if (logCrashString) {
-			SignalHandlers::clearCrashAnnotationRef("CrashString");
-		}
 
-		layout.endLayout();
+		CrashReports::ClearAnnotationRef("CrashString");
 	}
 }
 
-EmojiBlock::EmojiBlock(const style::font &font, const QString &str, uint16 from, uint16 length, uchar flags, const style::color &color, uint16 lnkIndex, const EmojiData *emoji) : ITextBlock(font, str, from, length, flags, color, lnkIndex), emoji(emoji) {
+EmojiBlock::EmojiBlock(const style::font &font, const QString &str, uint16 from, uint16 length, uchar flags, uint16 lnkIndex, EmojiPtr emoji) : ITextBlock(font, str, from, length, flags, lnkIndex)
+, emoji(emoji) {
 	_flags |= ((TextBlockTEmoji & 0x0F) << 8);
 	_width = int(st::emojiSize + 2 * st::emojiPadding);
+
+	_rpadding = 0;
+	for (auto i = length; i != 0;) {
+		auto ch = str[_from + (--i)];
+		if (ch.unicode() == QChar::Space) {
+			_rpadding += font->spacew;
+		} else {
+			break;
+		}
+	}
 }
 
-SkipBlock::SkipBlock(const style::font &font, const QString &str, uint16 from, int32 w, int32 h, uint16 lnkIndex) : ITextBlock(font, str, from, 1, 0, style::color(), lnkIndex), _height(h) {
+SkipBlock::SkipBlock(const style::font &font, const QString &str, uint16 from, int32 w, int32 h, uint16 lnkIndex) : ITextBlock(font, str, from, 1, 0, lnkIndex), _height(h) {
 	_flags |= ((TextBlockTSkip & 0x0F) << 8);
 	_width = w;
 }

@@ -1,26 +1,18 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "core/observer.h"
+#include <rpl/producer.h>
+#include <rpl/filter.h>
+#include <rpl/then.h>
+#include <rpl/range.h>
+#include "base/observer.h"
+#include "base/flags.h"
 
 namespace Notify {
 
@@ -33,53 +25,55 @@ struct PeerUpdate {
 	}
 	PeerData *peer;
 
-	enum class Flag {
+	enum class Flag : uint32 {
+		None                      = 0,
+
 		// Common flags
-		NameChanged           = 0x00000001U,
-		UsernameChanged       = 0x00000002U,
-		PhotoChanged          = 0x00000004U,
-		AboutChanged          = 0x00000008U,
-		NotificationsEnabled  = 0x00000010U,
-		SharedMediaChanged    = 0x00000020U,
-		MigrationChanged      = 0x00000040U,
+		NameChanged               = (1 << 0),
+		UsernameChanged           = (1 << 1),
+		PhotoChanged              = (1 << 2),
+		AboutChanged              = (1 << 3),
+		NotificationsEnabled      = (1 << 4),
+		MigrationChanged          = (1 << 6),
+		PinnedChanged             = (1 << 7),
+		RestrictionReasonChanged  = (1 << 8),
 
 		// For chats and channels
-		InviteLinkChanged     = 0x00000020U,
-		MembersChanged        = 0x00000040U,
-		AdminsChanged         = 0x00000080U,
+		InviteLinkChanged         = (1 << 9),
+		MembersChanged            = (1 << 10),
+		AdminsChanged             = (1 << 11),
+		BannedUsersChanged        = (1 << 12),
+		UnreadMentionsChanged     = (1 << 13),
 
 		// For users
-		UserCanShareContact   = 0x00010000U,
-		UserIsContact         = 0x00020000U,
-		UserPhoneChanged      = 0x00040000U,
-		UserIsBlocked         = 0x00080000U,
-		BotCommandsChanged    = 0x00100000U,
-		UserOnlineChanged     = 0x00200000U,
-		BotCanAddToGroups     = 0x00400000U,
+		UserCanShareContact       = (1 << 16),
+		UserIsContact             = (1 << 17),
+		UserPhoneChanged          = (1 << 18),
+		UserIsBlocked             = (1 << 19),
+		BotCommandsChanged        = (1 << 20),
+		UserOnlineChanged         = (1 << 21),
+		BotCanAddToGroups         = (1 << 22),
+		UserCommonChatsChanged    = (1 << 23),
+		UserHasCalls              = (1 << 24),
 
 		// For chats
-		ChatCanEdit           = 0x00010000U,
+		ChatCanEdit               = (1 << 16),
 
 		// For channels
-		ChannelAmIn           = 0x00010000U,
-		ChannelAmEditor       = 0x00020000U,
-		ChannelCanEditPhoto   = 0x00040000U,
-		ChannelCanAddMembers  = 0x00080000U,
-		ChannelCanViewAdmins  = 0x00100000U,
-		ChannelCanViewMembers = 0x00200000U,
+		ChannelAmIn               = (1 << 16),
+		ChannelRightsChanged      = (1 << 17),
+		ChannelStickersChanged    = (1 << 18),
+		ChannelPinnedChanged      = (1 << 19),
 	};
-	Q_DECLARE_FLAGS(Flags, Flag);
+	using Flags = base::flags<Flag>;
+	friend inline constexpr auto is_flag_type(Flag) { return true; }
+
 	Flags flags = 0;
 
 	// NameChanged data
-	PeerData::Names oldNames;
-	PeerData::NameFirstChars oldNameFirstChars;
-
-	// SharedMediaChanged data
-	int32 mediaTypesMask = 0;
+	base::flat_set<QChar> oldNameFirstLetters;
 
 };
-Q_DECLARE_OPERATORS_FOR_FLAGS(PeerUpdate::Flags);
 
 void peerUpdatedDelayed(const PeerUpdate &update);
 inline void peerUpdatedDelayed(PeerData *peer, PeerUpdate::Flags events) {
@@ -89,17 +83,33 @@ inline void peerUpdatedDelayed(PeerData *peer, PeerUpdate::Flags events) {
 }
 void peerUpdatedSendDelayed();
 
-namespace internal {
+class PeerUpdatedHandler {
+public:
+	template <typename Lambda>
+	PeerUpdatedHandler(PeerUpdate::Flags events, Lambda &&handler) : _events(events), _handler(std::move(handler)) {
+	}
+	void operator()(const PeerUpdate &update) const {
+		if (update.flags & _events) {
+			_handler(update);
+		}
+	}
 
-using PeerUpdateHandler = Function<void, const PeerUpdate&>;
-ConnectionId plainRegisterPeerObserver(PeerUpdate::Flags events, PeerUpdateHandler &&handler);
+private:
+	PeerUpdate::Flags _events;
+	base::lambda<void(const PeerUpdate&)> _handler;
 
-} // namespace internal
+};
+base::Observable<PeerUpdate, PeerUpdatedHandler> &PeerUpdated();
 
-template <typename ObserverType>
-void registerPeerObserver(PeerUpdate::Flags events, ObserverType *observer, void (ObserverType::*handler)(const PeerUpdate &)) {
-	auto connection = internal::plainRegisterPeerObserver(events, func(observer, handler));
-	observerRegistered(observer, connection);
-}
+rpl::producer<PeerUpdate> PeerUpdateViewer(
+	PeerUpdate::Flags flags);
+
+rpl::producer<PeerUpdate> PeerUpdateViewer(
+	not_null<PeerData*> peer,
+	PeerUpdate::Flags flags);
+
+rpl::producer<PeerUpdate> PeerUpdateValue(
+	not_null<PeerData*> peer,
+	PeerUpdate::Flags flags);
 
 } // namespace Notify

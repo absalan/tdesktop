@@ -1,22 +1,9 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "codegen/style/structure_types.h"
 
@@ -66,17 +53,6 @@ struct Value::DataTypes {
 
 	private:
 		data::point value_;
-
-	};
-
-	class TSprite : public DataBase {
-	public:
-		TSprite(data::sprite value) : value_(value) {
-		}
-		data::sprite Sprite() const override { return value_; }
-
-	private:
-		data::sprite value_;
 
 	};
 
@@ -154,9 +130,6 @@ Value::Value() : Value(TypeTag::Invalid, std::make_shared<DataBase>()) {
 Value::Value(data::point value) : Value(TypeTag::Point, std::make_shared<DataTypes::TPoint>(value)) {
 }
 
-Value::Value(data::sprite value) : Value(TypeTag::Sprite, std::make_shared<DataTypes::TSprite>(value)) {
-}
-
 Value::Value(data::size value) : Value(TypeTag::Size, std::make_shared<DataTypes::TSize>(value)) {
 }
 
@@ -193,8 +166,6 @@ Value::Value(TypeTag type, int value) : Value(type, std::make_shared<DataTypes::
 
 Value::Value(TypeTag type, std::string value) : Value(type, std::make_shared<DataTypes::TString>(value)) {
 	if (type_.tag != TypeTag::String &&
-		type_.tag != TypeTag::Transition &&
-		type_.tag != TypeTag::Cursor &&
 		type_.tag != TypeTag::Align) {
 		type_.tag = TypeTag::Invalid;
 		data_ = std::make_shared<DataBase>();
@@ -210,10 +181,7 @@ Value::Value(Type type, Qt::Initialization) : type_(type) {
 	case TypeTag::String: data_ = std::make_shared<DataTypes::TString>(""); break;
 	case TypeTag::Color: data_ = std::make_shared<DataTypes::TColor>(data::color { 0, 0, 0, 255 }); break;
 	case TypeTag::Point: data_ = std::make_shared<DataTypes::TPoint>(data::point { 0, 0 }); break;
-	case TypeTag::Sprite: data_ = std::make_shared<DataTypes::TSprite>(data::sprite { 0, 0, 0, 0 }); break;
 	case TypeTag::Size: data_ = std::make_shared<DataTypes::TSize>(data::size { 0, 0 }); break;
-	case TypeTag::Transition: data_ = std::make_shared<DataTypes::TString>("linear"); break;
-	case TypeTag::Cursor: data_ = std::make_shared<DataTypes::TString>("default"); break;
 	case TypeTag::Align: data_ = std::make_shared<DataTypes::TString>("topleft"); break;
 	case TypeTag::Margins: data_ = std::make_shared<DataTypes::TMargins>(data::margins { 0, 0, 0, 0 }); break;
 	case TypeTag::Font: data_ = std::make_shared<DataTypes::TFont>(data::font { "", 13, 0 }); break;

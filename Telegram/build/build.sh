@@ -3,8 +3,6 @@ FullExecPath=$PWD
 pushd `dirname $0` > /dev/null
 FullScriptPath=`pwd`
 popd > /dev/null
-QMakePath="/usr/local/tdesktop/Qt-5.6.0/bin/qmake"
-QMakeArgs="INCLUDEPATH+=/usr/local/include INCLUDEPATH+=/usr/local/include/opus"
 
 if [ ! -d "$FullScriptPath/../../../TelegramPrivate" ]; then
   echo ""
@@ -20,8 +18,6 @@ Error () {
   echo "$1"
   exit 1
 }
-
-FastParam="$1"
 
 if [ ! -f "$FullScriptPath/target" ]; then
   Error "Build target not found!"
@@ -56,27 +52,25 @@ if [ "$BuildTarget" == "linux" ]; then
   echo "Building version $AppVersionStrFull for Linux 64bit.."
   UpdateFile="tlinuxupd$AppVersion"
   SetupFile="tsetup.$AppVersionStrFull.tar.xz"
-  WorkPath="$HomePath/../Linux"
-  ReleasePath="$WorkPath/Release"
+  ReleasePath="$HomePath/../out/Release"
   BinaryName="Telegram"
 elif [ "$BuildTarget" == "linux32" ]; then
   echo "Building version $AppVersionStrFull for Linux 32bit.."
   UpdateFile="tlinux32upd$AppVersion"
   SetupFile="tsetup32.$AppVersionStrFull.tar.xz"
-  WorkPath="$HomePath/../Linux"
-  ReleasePath="$WorkPath/Release"
+  ReleasePath="$HomePath/../out/Release"
   BinaryName="Telegram"
 elif [ "$BuildTarget" == "mac" ]; then
   echo "Building version $AppVersionStrFull for OS X 10.8+.."
   UpdateFile="tmacupd$AppVersion"
   SetupFile="tsetup.$AppVersionStrFull.dmg"
-  ReleasePath="$HomePath/../Mac/Release"
+  ReleasePath="$HomePath/../out/Release"
   BinaryName="Telegram"
 elif [ "$BuildTarget" == "mac32" ]; then
   echo "Building version $AppVersionStrFull for OS X 10.6 and 10.7.."
   UpdateFile="tmac32upd$AppVersion"
   SetupFile="tsetup32.$AppVersionStrFull.dmg"
-  ReleasePath="$HomePath/../Mac/Release"
+  ReleasePath="$HomePath/../out/Release"
   BinaryName="Telegram"
 elif [ "$BuildTarget" == "macstore" ]; then
   if [ "$BetaVersion" != "0" ]; then
@@ -84,10 +78,8 @@ elif [ "$BuildTarget" == "macstore" ]; then
   fi
 
   echo "Building version $AppVersionStrFull for Mac App Store.."
-  ReleasePath="$HomePath/../Mac/Release"
+  ReleasePath="$HomePath/../out/Release"
   BinaryName="Telegram Desktop"
-  DropboxPath="/Volumes/Storage/Dropbox/Telegram/deploy/$AppVersionStrMajor"
-  DropboxDeployPath="$DropboxPath/$AppVersionStrFull"
 else
   Error "Invalid target!"
 fi
@@ -129,20 +121,9 @@ if [ "$BuildTarget" == "linux" ] || [ "$BuildTarget" == "linux32" ]; then
     Error "Dropbox path not found!"
   fi
 
-  mkdir -p "$WorkPath/ReleaseIntermediateUpdater"
-  cd "$WorkPath/ReleaseIntermediateUpdater"
-  "$QMakePath" "$HomePath/Updater.pro" -r -spec linux-g++
-  make
-  echo "Updater build complete!"
+  gyp/refresh.sh
 
-  mkdir -p "$WorkPath/ReleaseIntermediate"
-  cd "$WorkPath/ReleaseIntermediate"
-  "$QMakePath" $QMakeArgs "$HomePath/Telegram.pro" -r -spec linux-g++
-
-  eval "$HomePath/build/makefile_static.sh"
-  ./../codegen/Debug/codegen_style "-I./../../Telegram/Resources" "-I./../../Telegram/SourceFiles" "-o./GeneratedFiles/styles" all_files.style --rebuild
-  ./../codegen/Debug/codegen_numbers "-o./GeneratedFiles" "./../../Telegram/Resources/numbers.txt"
-  ./../DebugLang/MetaLang -lang_in ./../../Telegram/Resources/langs/lang.strings -lang_out ./GeneratedFiles/lang_auto
+  cd $ReleasePath
   make -j4
   echo "$BinaryName build complete!"
 
@@ -150,12 +131,52 @@ if [ "$BuildTarget" == "linux" ] || [ "$BuildTarget" == "linux32" ]; then
     Error "$BinaryName not found!"
   fi
 
+  BadCount=`objdump -T $ReleasePath/$BinaryName | grep GLIBC_2\.1[6-9] | wc -l`
+  if [ "$BadCount" != "0" ]; then
+    Error "Bad GLIBC usages found: $BadCount"
+  fi
+
+  BadCount=`objdump -T $ReleasePath/$BinaryName | grep GLIBC_2\.2[0-9] | wc -l`
+  if [ "$BadCount" != "0" ]; then
+    Error "Bad GLIBC usages found: $BadCount"
+  fi
+
+  BadCount=`objdump -T $ReleasePath/$BinaryName | grep GCC_4\.[3-9] | wc -l`
+  if [ "$BadCount" != "0" ]; then
+    Error "Bad GCC usages found: $BadCount"
+  fi
+
+  BadCount=`objdump -T $ReleasePath/$BinaryName | grep GCC_[5-9]\. | wc -l`
+  if [ "$BadCount" != "0" ]; then
+    Error "Bad GCC usages found: $BadCount"
+  fi
+
   if [ ! -f "$ReleasePath/Updater" ]; then
     Error "Updater not found!"
   fi
 
+  BadCount=`objdump -T $ReleasePath/Updater | grep GLIBC_2\.1[6-9] | wc -l`
+  if [ "$BadCount" != "0" ]; then
+    Error "Bad GLIBC usages found: $BadCount"
+  fi
+
+  BadCount=`objdump -T $ReleasePath/Updater | grep GLIBC_2\.2[0-9] | wc -l`
+  if [ "$BadCount" != "0" ]; then
+    Error "Bad GLIBC usages found: $BadCount"
+  fi
+
+  BadCount=`objdump -T $ReleasePath/Updater | grep GCC_4\.[3-9] | wc -l`
+  if [ "$BadCount" != "0" ]; then
+    Error "Bad GCC usages found: $BadCount"
+  fi
+
+  BadCount=`objdump -T $ReleasePath/Updater | grep GCC_[5-9]\. | wc -l`
+  if [ "$BadCount" != "0" ]; then
+    Error "Bad GCC usages found: $BadCount"
+  fi
+
   echo "Dumping debug symbols.."
-  "$HomePath/../../Libraries/breakpad/src/tools/linux/dump_syms/dump_syms" "$ReleasePath/$BinaryName" > "$ReleasePath/$BinaryName.sym"
+  "$HomePath/../../Libraries/breakpad/out/Default/dump_syms" "$ReleasePath/$BinaryName" > "$ReleasePath/$BinaryName.sym"
   echo "Done!"
 
   echo "Stripping the executable.."
@@ -209,15 +230,12 @@ fi
 
 if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "mac32" ] || [ "$BuildTarget" == "macstore" ]; then
 
-  DropboxSymbolsPath="/Volumes/Storage/Dropbox/Telegram/symbols"
+  DropboxSymbolsPath="$HOME/Dropbox/Telegram/symbols"
   if [ ! -d "$DropboxSymbolsPath" ]; then
     Error "Dropbox path not found!"
   fi
 
-  if [ "$FastParam" != "fast" ]; then
-    touch "./Resources/telegram.qrc"
-    touch "./Telegram.plist"
-  fi
+  gyp/refresh.sh
   xcodebuild -project Telegram.xcodeproj -alltargets -configuration Release build
 
   if [ ! -d "$ReleasePath/$BinaryName.app" ]; then
@@ -229,9 +247,17 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "mac32" ] || [ "$BuildTarg
   fi
 
   if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "mac32" ]; then
-    echo "Removing Updater debug symbols.."
-    rm -rf "$ReleasePath/$BinaryName.app/Contents/Frameworks/Updater.dSYM"
-    echo "Done!"
+    if [ ! -f "$ReleasePath/$BinaryName.app/Contents/Frameworks/Updater" ]; then
+      Error "Updater not found!"
+    fi
+    if [ ! -f "$ReleasePath/$BinaryName.app/Contents/Helpers/crashpad_handler" ]; then
+      Error "crashpad_handler not found!"
+    fi
+  fi
+  if [ "$BuildTarget" == "macstore" ]; then
+    if [ ! -d "$ReleasePath/$BinaryName.app/Contents/Frameworks/Breakpad.framework" ]; then
+      Error "Breakpad.framework not found!"
+    fi
   fi
 
   echo "Dumping debug symbols.."
@@ -246,7 +272,9 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "mac32" ] || [ "$BuildTarg
   if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "mac32" ]; then
     codesign --force --deep --sign "Developer ID Application: John Preston" "$ReleasePath/$BinaryName.app"
   elif [ "$BuildTarget" == "macstore" ]; then
-    codesign --force --deep --sign "3rd Party Mac Developer Application: TELEGRAM MESSENGER LLP (6N38VWS5BX)" "$ReleasePath/$BinaryName.app" --entitlements "Telegram/Telegram Desktop.entitlements"
+    codesign --force --deep --sign "3rd Party Mac Developer Application: TELEGRAM MESSENGER LLP (6N38VWS5BX)" "$ReleasePath/$BinaryName.app" --entitlements "$HomePath/Telegram/Telegram Desktop.entitlements"
+    echo "Making an installer.."
+    productbuild --sign "3rd Party Mac Developer Installer: TELEGRAM MESSENGER LLP (6N38VWS5BX)" --component "$ReleasePath/$BinaryName.app" /Applications "$ReleasePath/$BinaryName.pkg"
   fi
   echo "Done!"
 
@@ -287,15 +315,16 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "mac32" ] || [ "$BuildTarg
   if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "mac32" ]; then
     if [ "$BetaVersion" == "0" ]; then
       cd "$ReleasePath"
-      cp -f tsetup_blank.dmg tsetup.dmg
-      temppath=`hdiutil attach -nobrowse -noautoopenrw -readwrite tsetup.dmg | awk -F "\t" 'END {print $3}'`
-      cp -R "./$BinaryName.app" "$temppath/"
-      bless --folder "$temppath/" --openfolder "$temppath/"
-      hdiutil detach "$temppath"
-      hdiutil convert tsetup.dmg -format UDZO -imagekey zlib-level=9 -ov -o "$SetupFile"
+      cp -f tsetup_template.dmg tsetup.temp.dmg
+      TempDiskPath=`hdiutil attach -nobrowse -noautoopenrw -readwrite tsetup.temp.dmg | awk -F "\t" 'END {print $3}'`
+      cp -R "./$BinaryName.app" "$TempDiskPath/"
+      bless --folder "$TempDiskPath/" --openfolder "$TempDiskPath/"
+      hdiutil detach "$TempDiskPath"
+      hdiutil convert tsetup.temp.dmg -format UDZO -imagekey zlib-level=9 -ov -o "$SetupFile"
+      rm tsetup.temp.dmg
     fi
     cd "$ReleasePath"
-    "./Packer.app/Contents/MacOS/Packer" -path "$BinaryName.app" -version $VersionForPacker $AlphaBetaParam
+    "./Packer" -path "$BinaryName.app" -target "$BuildTarget" -version $VersionForPacker $AlphaBetaParam
     echo "Packer done!"
 
     if [ "$BetaVersion" != "0" ]; then
@@ -334,12 +363,13 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "mac32" ] || [ "$BuildTarg
     mv "$ReleasePath/$BinaryName.app.dSYM" "$DeployPath/"
     rm "$ReleasePath/$BinaryName.app/Contents/MacOS/$BinaryName"
     rm "$ReleasePath/$BinaryName.app/Contents/Frameworks/Updater"
+    rm "$ReleasePath/$BinaryName.app/Contents/Info.plist"
     rm -rf "$ReleasePath/$BinaryName.app/Contents/_CodeSignature"
     mv "$ReleasePath/$UpdateFile" "$DeployPath/"
     mv "$ReleasePath/$SetupFile" "$DeployPath/"
 
     if [ "$BuildTarget" == "mac32" ]; then
-      ReleaseToPath="$HomePath/../../tother/tmac32"
+      ReleaseToPath="$HomePath/../../deploy_temp/tmac32"
       DeployToPath="$ReleaseToPath/$AppVersionStrMajor/$AppVersionStrFull"
       if [ ! -d "$ReleaseToPath/$AppVersionStrMajor" ]; then
         mkdir "$ReleaseToPath/$AppVersionStrMajor"
@@ -351,7 +381,6 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "mac32" ] || [ "$BuildTarg
 
       cp -v "$DeployPath/$UpdateFile" "$DeployToPath/"
       cp -v "$DeployPath/$SetupFile" "$DeployToPath/"
-      cp -rv "$DeployPath/$BinaryName.app.dSYM" "$DeployToPath/"
       if [ "$BetaVersion" != "0" ]; then
         cp -v "$DeployPath/$BetaKeyFile" "$DeployToPath/"
       fi
@@ -363,12 +392,14 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "mac32" ] || [ "$BuildTarg
     mv "$ReleasePath/$BinaryName.pkg" "$DeployPath/"
     mv "$ReleasePath/$BinaryName.app.dSYM" "$DeployPath/"
     rm "$ReleasePath/$BinaryName.app/Contents/MacOS/$BinaryName"
+    rm "$ReleasePath/$BinaryName.app/Contents/Info.plist"
     rm -rf "$ReleasePath/$BinaryName.app/Contents/_CodeSignature"
-
-    mkdir -p "$DropboxDeployPath"
-    cp -v "$DeployPath/$BinaryName.app" "$DropboxDeployPath/"
-    cp -rv "$DeployPath/$BinaryName.app.dSYM" "$DropboxDeployPath/"
   fi
 fi
 
 echo "Version $AppVersionStrFull is ready!";
+echo -en "\007";
+sleep 1;
+echo -en "\007";
+sleep 1;
+echo -en "\007";

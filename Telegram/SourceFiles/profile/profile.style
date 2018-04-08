@@ -1,39 +1,19 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 using "basic.style";
-using "basic_types.style";
+
+using "ui/widgets/widgets.style";
+using "info/info.style";
 
 profileBg: windowBg;
 
 profileTopBarHeight: topBarHeight;
-profileTopBarBackIconFg: #0290d7;
-profileTopBarBackIcon: icon {
-	{ "topbar_back_arrow", profileTopBarBackIconFg },
-};
-profileTopBarBackIconPosition: point(15px, 20px);
-profileTopBarBackFont: font(14px);
-profileTopBarBackFg: #1485c2;
-profileTopBarBackPosition: point(32px, 17px);
-profileFixedBarButton: RoundButton(topBarButton) {
-}
+profileFixedBarButton: topBarButton;
 
 profileMarginTop: 13px;
 profilePhotoSize: 112px;
@@ -42,14 +22,16 @@ profilePhotoLeftMax: 35px;
 profilePhotoDuration: 500;
 profileNameLeft: 26px;
 profileNameTop: 9px;
-profileNameLabel: flatLabel(labelDefFlat) {
+profileNameLabel: FlatLabel(defaultFlatLabel) {
 	margin: margins(10px, 5px, 10px, 5px);
-	font: font(16px semibold);
-	width: 160px;
+	minWidth: 160px;
 	maxHeight: 24px;
-	textFg: #333333;
-}
-profileNameTextStyle: textStyle(defaultTextStyle) {
+	textFg: windowBoldFg;
+	style: TextStyle(defaultTextStyle) {
+		font: font(16px semibold);
+		linkFont: font(16px semibold);
+		linkFontOver: font(16px semibold underline);
+	}
 }
 profileStatusLeft: 27px;
 profileStatusTop: 35px;
@@ -61,24 +43,15 @@ profileMarginBottom: 30px;
 profileButtonLeft: 27px;
 profileButtonTop: 88px;
 profileButtonSkip: 10px;
-profilePrimaryButton: RoundButton(defaultActiveButton) {
-}
-profileSecondaryButton: RoundButton(profilePrimaryButton) {
-	textFg: semiboldButtonBlueText;
-	textFgOver: semiboldButtonBlueText;
-	textBg: #ffffff;
-	textBgOver: #f2f7fa;
-}
-profileAddMemberIcon: icon {
-	{ "profile_add_member", windowActiveBg, point(20px, 10px) },
-};
+profilePrimaryButton: defaultActiveButton;
+profileSecondaryButton: defaultLightButton;
 profileAddMemberButton: RoundButton(profileSecondaryButton) {
 	width: 62px;
-	icon: profileAddMemberIcon;
+	icon: icon {{ "profile_add_member", lightButtonFg, point(20px, 10px) }};
 }
 
 profileDropAreaBg: profileBg;
-profileDropAreaFg: windowActiveBg;
+profileDropAreaFg: lightButtonFg;
 profileDropAreaPadding: margins(25px, 3px, 25px, 20px);
 profileDropAreaTitleFont: font(24px);
 profileDropAreaTitleTop: 30px;
@@ -88,13 +61,11 @@ profileDropAreaBorderFg: profileDropAreaFg;
 profileDropAreaBorderWidth: 3px;
 profileDropAreaDuration: 200;
 
+profileDividerBg: windowBgOver;
 profileDividerFg: windowShadowFg;
-profileDividerLeft: icon {
-	{ "profile_divider_left", profileDividerFg },
-};
-profileDividerFill: icon {
-	{ "profile_divider_fill", profileDividerFg },
-};
+profileDividerLeft: icon {{ "profile_divider_left", profileDividerFg }};
+profileDividerTop: icon {{ "profile_divider_top", profileDividerFg }};
+profileDividerBottom: icon {{ "profile_divider_bottom", profileDividerFg }};
 
 profileBlocksTop: 7px;
 profileBlocksBottom: 20px;
@@ -108,18 +79,22 @@ profileBlockMarginRight: 10px;
 profileBlockMarginBottom: 7px;
 profileBlockTitleHeight: 24px;
 profileBlockTitleFont: font(14px semibold);
-profileBlockTitleFg: #333333;
+profileBlockTitleFg: windowBoldFg;
 profileBlockTitlePosition: point(24px, 0px);
-profileBlockLabel: flatLabel(labelDefFlat) {
+profileBlockLabel: FlatLabel(defaultFlatLabel) {
 	textFg: windowSubTextFg;
 }
-profileBlockTextPart: flatLabel(labelDefFlat) {
-	width: 180px;
+profileBlockTextPart: FlatLabel(defaultFlatLabel) {
+	minWidth: 180px;
 	margin: margins(5px, 5px, 5px, 5px);
 }
-profileBlockOneLineTextPart: flatLabel(profileBlockTextPart) {
-	width: 0px; // No need to set minWidth in one-line text.
+profileBlockOneLineTextPart: FlatLabel(profileBlockTextPart) {
+	minWidth: 0px; // No need to set minWidth in one-line text.
 	maxHeight: 20px;
+}
+profileBioLabel: FlatLabel(profileBlockOneLineTextPart) {
+	minWidth: 120px;
+	maxHeight: 0px;
 }
 profileBlockOneLineSkip: 9px;
 profileBlockOneLineWidthMax: 240px;
@@ -127,40 +102,51 @@ profileBlockOneLineWidthMax: 240px;
 profileEnableNotificationsTop: 7px;
 profileSettingsBlockSkip: 8px;
 
-profileInviteLinkText: flatLabel(profileBlockTextPart) {
-	width: 1px; // Required for BreakEverywhere
+profileInviteLinkText: FlatLabel(profileBlockTextPart) {
+	minWidth: 1px; // Required for BreakEverywhere
 }
 
 profileLimitReachedSkip: 6px;
 
-profileMemberHeight: 58px;
+profileMemberItem: PeerListItem(defaultPeerListItem) {
+	left: 8px;
+	bottom: profileBlockMarginBottom;
+	button: defaultLeftOutlineButton;
+	maximalWidth: profileBlockWideWidthMax;
+	statusFgOver: profileStatusFgOver;
+}
 profileMemberPaddingLeft: 16px;
-profileMemberPhotoSize: 46px;
-profileMemberPhotoPosition: point(12px, 6px);
-profileMemberNamePosition: point(68px, 11px);
-profileMemberNameFg: #222222;//windowTextFg;
-profileMemberStatusPosition: point(68px, 31px);
-profileMemberStatusFg: windowSubTextFg;
-profileMemberStatusFgOver: windowSubTextFgOver;
-profileMemberStatusFgActive: windowActiveTextFg;
-profileMemberAdminIcon: icon {
-	{ "profile_admin_star", #3babe7, point(4px, 3px) },
-};
-profileLimitReachedLabel: flatLabel(labelDefFlat) {
-	width: 180px;
+profileMemberNameFg: windowBoldFg;
+profileMemberCreatorIcon: icon {{ "profile_admin_star", profileAdminStartFg, point(4px, 3px) }};
+profileMemberCreatorIconOver: icon {{ "profile_admin_star", profileAdminStarFgOver, point(4px, 3px) }};
+profileMemberAdminIcon: icon {{ "profile_admin_star", profileOtherAdminStarFg, point(4px, 3px) }};
+profileMemberAdminIconOver: icon {{ "profile_admin_star", profileOtherAdminStarFgOver, point(4px, 3px) }};
+profileLimitReachedLabel: FlatLabel(defaultFlatLabel) {
+	minWidth: 180px;
 	margin: margins(profileMemberPaddingLeft, 9px, profileMemberPaddingLeft, 6px);
-}
-profileLimitReachedStyle: textStyle(defaultTextStyle) {
-	lineHeight: 19px;
-}
-
-profileReportReasonOther: InputArea(defaultInputArea) {
-	textMargins: margins(1px, 6px, 1px, 4px);
-	heightMax: 115px;
+	style: TextStyle(defaultTextStyle) {
+		lineHeight: 19px;
+	}
 }
 
-profileVerifiedCheckPosition: point(-3px, 7px);
+profileReportReasonOther: InputField(defaultInputField) {
+	textMargins: margins(1px, 26px, 1px, 4px);
+	heightMax: 135px;
+}
+
+profileVerifiedCheckShift: -3px;
 profileVerifiedCheck: icon {
-	{ "profile_verified_star", #4abcf1 },
-	{ "profile_verified_check", #ffffff, point(4px, 4px) }
+	{ "profile_verified_star", profileVerifiedCheckBg, point(0px, 7px) },
+	{ "profile_verified_check", profileVerifiedCheckFg, point(4px, 11px) }
 };
+
+profileCommonGroupsSkip: 24px;
+profileCommonGroupsLeftMin: 24px;
+profileCommonGroupsLeftMax: 36px;
+profileCommonGroupsWidthMax: 480px;
+profileCommonGroupsPadding: margins(7px, 7px, 7px, 7px);
+profileCommonGroupsPhotoSize: 42px;
+profileCommonGroupsNameTop: 12px;
+profileCommonGroupsNameLeft: 16px;
+profileCommonGroupsBgOver: windowBgOver;
+profileCommonGroupsRipple: defaultRippleAnimation;

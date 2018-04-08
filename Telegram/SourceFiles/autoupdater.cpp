@@ -1,25 +1,10 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-
-#include "stdafx.h"
 
 #include "autoupdater.h"
 
@@ -35,17 +20,17 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #endif // else of Q_OS_WIN
 
 #include "application.h"
-#include "pspecific.h"
+#include "platform/platform_specific.h"
 
 #ifndef TDESKTOP_DISABLE_AUTOUPDATE
 
 #ifdef Q_OS_WIN
 typedef DWORD VerInt;
 typedef WCHAR VerChar;
-#else
+#else // Q_OS_WIN
 typedef int VerInt;
 typedef wchar_t VerChar;
-#endif
+#endif // Q_OS_WIN
 
 UpdateChecker::UpdateChecker(QThread *thread, const QString &url) : reply(0), already(0), full(0) {
 	updateUrl = url;
@@ -248,9 +233,9 @@ void UpdateChecker::unpackUpdate() {
 
 #ifdef Q_OS_WIN // use Lzma SDK for win
 	const int32 hSigLen = 128, hShaLen = 20, hPropsLen = LZMA_PROPS_SIZE, hOriginalSizeLen = sizeof(int32), hSize = hSigLen + hShaLen + hPropsLen + hOriginalSizeLen; // header
-#else
+#else // Q_OS_WIN
 	const int32 hSigLen = 128, hShaLen = 20, hPropsLen = 0, hOriginalSizeLen = sizeof(int32), hSize = hSigLen + hShaLen + hOriginalSizeLen; // header
-#endif
+#endif // Q_OS_WIN
 
 	QByteArray compressed = outputFile.readAll();
 	int32 compressedLen = compressed.size() - hSize;
@@ -315,7 +300,7 @@ void UpdateChecker::unpackUpdate() {
 		LOG(("Update Error: could not uncompress lzma, code: %1").arg(uncompressRes));
 		return fatalFail();
 	}
-#else
+#else // Q_OS_WIN
 	lzma_stream stream = LZMA_STREAM_INIT;
 
 	lzma_ret ret = lzma_stream_decoder(&stream, UINT64_MAX, LZMA_CONCATENATED);
@@ -358,15 +343,13 @@ void UpdateChecker::unpackUpdate() {
 		LOG(("Error in decompression: %1 (error code %2)").arg(msg).arg(res));
 		return fatalFail();
 	}
-#endif
+#endif // Q_OS_WIN
 
 	tempDir.mkdir(tempDir.absolutePath());
 
 	quint32 version;
 	{
-		QBuffer buffer(&uncompressed);
-		buffer.open(QIODevice::ReadOnly);
-		QDataStream stream(&buffer);
+		QDataStream stream(uncompressed);
 		stream.setVersion(QDataStream::Qt_5_1);
 
 		stream >> version;
@@ -410,7 +393,7 @@ void UpdateChecker::unpackUpdate() {
 			stream >> relativeName >> fileSize >> fileInnerData;
 #if defined Q_OS_MAC || defined Q_OS_LINUX
 			stream >> executable;
-#endif
+#endif // Q_OS_MAC || Q_OS_LINUX
 			if (stream.status() != QDataStream::Ok) {
 				LOG(("Update Error: cant read file from downloaded stream, status: %1").arg(stream.status()));
 				return fatalFail();
@@ -429,9 +412,10 @@ void UpdateChecker::unpackUpdate() {
 				LOG(("Update Error: cant open file '%1' for writing").arg(tempDirPath + '/' + relativeName));
 				return fatalFail();
 			}
-			if (f.write(fileInnerData) != fileSize) {
+			auto writtenBytes = f.write(fileInnerData);
+			if (writtenBytes != fileSize) {
 				f.close();
-				LOG(("Update Error: cant write file '%1'").arg(tempDirPath + '/' + relativeName));
+				LOG(("Update Error: cant write file '%1', desiredSize: %2, write result: %3").arg(tempDirPath + '/' + relativeName).arg(fileSize).arg(writtenBytes));
 				return fatalFail();
 			}
 			f.close();
@@ -489,7 +473,7 @@ UpdateChecker::~UpdateChecker() {
 
 bool checkReadyUpdate() {
 	QString readyFilePath = cWorkingDir() + qsl("tupdates/temp/ready"), readyPath = cWorkingDir() + qsl("tupdates/temp");
-	if (!QFile(readyFilePath).exists()) {
+	if (!QFile(readyFilePath).exists() || cExeName().isEmpty()) {
 		if (QDir(cWorkingDir() + qsl("tupdates/ready")).exists() || QDir(cWorkingDir() + qsl("tupdates/temp")).exists()) {
 			UpdateChecker::clearAll();
 		}
@@ -534,13 +518,13 @@ bool checkReadyUpdate() {
 #ifdef Q_OS_WIN
 	QString curUpdater = (cExeDir() + qsl("Updater.exe"));
 	QFileInfo updater(cWorkingDir() + qsl("tupdates/temp/Updater.exe"));
-#elif defined Q_OS_MAC
+#elif defined Q_OS_MAC // Q_OS_WIN
 	QString curUpdater = (cExeDir() + cExeName() + qsl("/Contents/Frameworks/Updater"));
 	QFileInfo updater(cWorkingDir() + qsl("tupdates/temp/Telegram.app/Contents/Frameworks/Updater"));
-#elif defined Q_OS_LINUX
+#elif defined Q_OS_LINUX // Q_OS_MAC
 	QString curUpdater = (cExeDir() + qsl("Updater"));
 	QFileInfo updater(cWorkingDir() + qsl("tupdates/temp/Updater"));
-#endif
+#endif // Q_OS_LINUX
 	if (!updater.exists()) {
 		QFileInfo current(curUpdater);
 		if (!current.exists()) {
@@ -567,23 +551,23 @@ bool checkReadyUpdate() {
 		UpdateChecker::clearAll();
 		return false;
 	}
-#elif defined Q_OS_MAC
+#elif defined Q_OS_MAC // Q_OS_WIN
 	QDir().mkpath(QFileInfo(curUpdater).absolutePath());
 	DEBUG_LOG(("Update Info: moving %1 to %2...").arg(updater.absoluteFilePath()).arg(curUpdater));
 	if (!objc_moveFile(updater.absoluteFilePath(), curUpdater)) {
 		UpdateChecker::clearAll();
 		return false;
 	}
-#elif defined Q_OS_LINUX
+#elif defined Q_OS_LINUX // Q_OS_MAC
 	if (!linuxMoveFile(QFile::encodeName(updater.absoluteFilePath()).constData(), QFile::encodeName(curUpdater).constData())) {
 		UpdateChecker::clearAll();
 		return false;
 	}
-#endif
+#endif // Q_OS_LINUX
 	return true;
 }
 
-#endif
+#endif // !TDESKTOP_DISABLE_AUTOUPDATE
 
 QString countBetaVersionSignature(uint64 version) { // duplicated in packer.cpp
 	if (cBetaPrivateKey().isEmpty()) {

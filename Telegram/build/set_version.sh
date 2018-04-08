@@ -90,6 +90,26 @@ repl () {
   fi
 }
 
+echo "Checking changelog..."
+ChangelogFile="$FullScriptPath/../../changelog.txt"
+ChangelogCommand="grep -sc '^$VersionStr ' $ChangelogFile"
+set +e
+FoundCount=`eval $ChangelogCommand`
+set -e
+if [ "$FoundCount" == "0" ]; then
+  ChangelogCommand="grep -sc '^$VersionStrSmall ' $ChangelogFile"
+  set +e
+  FoundCount=`eval $ChangelogCommand`
+  set -e
+  if [ "$FoundCount" == "0" ]; then
+    Error "Changelog entry not found!"
+  elif [ "$FoundCount" != "1" ]; then
+    Error "Wrong changelog entries count found: $FoundCount"
+  fi
+elif [ "$FoundCount" != "1" ]; then
+  Error "Wrong changelog entries count found: $FoundCount"
+fi
+
 echo "Patching build/version..."
 VersionFilePath="$FullScriptPath/version"
 repl "\(AppVersion\) \([ ]*\)[0-9][0-9]*" "\1\2 $VersionFull" "$VersionFilePath"
@@ -106,11 +126,6 @@ repl "\(AppVersion [ ]*=\) \([ ]*\)[0-9][0-9]*" "\1\2 $VersionFull" "$VersionHea
 repl "\(AppVersionStr [ ]*=\) \([ ]*\)[^;][^;]*" "\1\2 \"$VersionStrSmall\"" "$VersionHeaderPath"
 repl "\(AppAlphaVersion [ ]*=\) \([ ]*\)[a-z][a-z]*" "\1\2 $VersionAlphaBool" "$VersionHeaderPath"
 
-echo "Patching project.pbxproj..."
-TelegramProjectPath="$FullScriptPath/../Telegram.xcodeproj/project.pbxproj"
-repl "\(TDESKTOP_MAJOR_VERSION [ ]*=\) \([ ]*\)[^;][^;]*" "\1\2 $VersionMajor.$VersionMinor" "$TelegramProjectPath"
-repl "\(TDESKTOP_VERSION [ ]*=\) \([ ]*\)[^;][^;]*" "\1\2 $VersionStrSmall" "$TelegramProjectPath"
-
 echo "Patching Telegram.rc..."
 ResourcePath="$FullScriptPath/../Resources/winrc/Telegram.rc"
 repl "\(FILEVERSION\) \([ ]*\)[0-9][0-9]*,[0-9][0-9]*,[0-9][0-9]*,[0-9][0-9]*" "\1\2 $VersionMajor,$VersionMinor,$VersionPatch,$VersionBeta" "$ResourcePath"
@@ -125,3 +140,6 @@ repl "\(PRODUCTVERSION\) \([ ]*\)[0-9][0-9]*,[0-9][0-9]*,[0-9][0-9]*,[0-9][0-9]*
 repl "\(\"FileVersion\",\) \([ ]*\)\"[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\"" "\1\2 \"$VersionMajor.$VersionMinor.$VersionPatch.$VersionBeta\"" "$ResourcePath"
 repl "\(\"ProductVersion\",\) \([ ]*\)\"[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\"" "\1\2 \"$VersionMajor.$VersionMinor.$VersionPatch.$VersionBeta\"" "$ResourcePath"
 
+echo "Patching appxmanifest.xml..."
+ResourcePath="$FullScriptPath/../Resources/uwp/AppX/AppxManifest.xml"
+repl " \(Version=\)\"[0-9][0-9]*.[0-9][0-9]*.[0-9][0-9]*.[0-9][0-9]*\"" " \1\"$VersionMajor.$VersionMinor.$VersionPatch.$VersionBeta\"" "$ResourcePath"

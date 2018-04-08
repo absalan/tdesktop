@@ -1,26 +1,15 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "base/flags.h"
 #include "inline_bots/inline_bot_layout_item.h"
+#include "ui/effects/radial_animation.h"
 #include "ui/text/text.h"
 
 namespace InlineBots {
@@ -29,9 +18,9 @@ namespace internal {
 
 class FileBase : public ItemBase {
 public:
-	FileBase(Result *result);
+	FileBase(not_null<Context*> context, Result *result);
 	// for saved gif layouts
-	FileBase(DocumentData *doc);
+	FileBase(not_null<Context*> context, DocumentData *doc);
 
 protected:
 	DocumentData *getShownDocument() const;
@@ -57,8 +46,8 @@ private:
 
 class Gif : public FileBase {
 public:
-	Gif(Result *result);
-	Gif(DocumentData *doc, bool hasDeleteButton);
+	Gif(not_null<Context*> context, Result *result);
+	Gif(not_null<Context*> context, DocumentData *doc, bool hasDeleteButton);
 
 	void setPosition(int32 position) override;
 	void initDimensions() override;
@@ -71,60 +60,56 @@ public:
 	}
 
 	void paint(Painter &p, const QRect &clip, const PaintContext *context) const override;
-	void getState(ClickHandlerPtr &link, HistoryCursorState &cursor, int x, int y) const override;
+	TextState getState(
+		QPoint point,
+		StateRequest request) const override;
 
 	// ClickHandlerHost interface
 	void clickHandlerActiveChanged(const ClickHandlerPtr &p, bool active) override;
 
-	~Gif();
+	int resizeGetHeight(int width) override;
 
 private:
-
 	QSize countFrameSize() const;
 
 	enum class StateFlag {
-		Over = 0x01,
-		DeleteOver = 0x02,
+		Over       = (1 << 0),
+		DeleteOver = (1 << 1),
 	};
-	Q_DECLARE_FLAGS(StateFlags, StateFlag);
+	using StateFlags = base::flags<StateFlag>;
+	friend inline constexpr auto is_flag_type(StateFlag) { return true; };
 	StateFlags _state;
-	friend inline StateFlags operator~(StateFlag flag) {
-		return ~StateFlags(flag);
-	}
 
-	ClipReader *_gif = nullptr;
+	Media::Clip::ReaderPointer _gif;
 	ClickHandlerPtr _delete;
-	bool gif() const {
-		return (!_gif || _gif == BadClipReader) ? false : true;
-	}
 	mutable QPixmap _thumb;
 	void prepareThumb(int32 width, int32 height, const QSize &frame) const;
 
 	void ensureAnimation() const;
-	bool isRadialAnimation(uint64 ms) const;
-	void step_radial(uint64 ms, bool timer);
+	bool isRadialAnimation(TimeMs ms) const;
+	void step_radial(TimeMs ms, bool timer);
 
-	void clipCallback(ClipReaderNotification notification);
+	void clipCallback(Media::Clip::Notification notification);
 
 	struct AnimationData {
 		AnimationData(AnimationCallbacks &&callbacks)
 			: over(false)
-			, radial(std_::move(callbacks)) {
+			, radial(std::move(callbacks)) {
 		}
 		bool over;
-		FloatAnimation _a_over;
-		RadialAnimation radial;
+		Animation _a_over;
+		Ui::RadialAnimation radial;
 	};
-	mutable AnimationData *_animation = nullptr;
-	mutable FloatAnimation _a_deleteOver;
+	mutable std::unique_ptr<AnimationData> _animation;
+	mutable Animation _a_deleteOver;
 
 };
 
 class Photo : public ItemBase {
 public:
-	Photo(Result *result);
+	Photo(not_null<Context*> context, Result *result);
 	// Not used anywhere currently.
-	//LayoutInlinePhoto(PhotoData *photo);
+	//Photo(not_null<Context*> context, PhotoData *photo);
 
 	void initDimensions() override;
 
@@ -136,7 +121,9 @@ public:
 	}
 
 	void paint(Painter &p, const QRect &clip, const PaintContext *context) const override;
-	void getState(ClickHandlerPtr &link, HistoryCursorState &cursor, int x, int y) const override;
+	TextState getState(
+		QPoint point,
+		StateRequest request) const override;
 
 private:
 	PhotoData *getShownPhoto() const;
@@ -151,9 +138,9 @@ private:
 
 class Sticker : public FileBase {
 public:
-	Sticker(Result *result);
+	Sticker(not_null<Context*> context, Result *result);
 	// Not used anywhere currently.
-	//LayoutInlineSticker(DocumentData *document);
+	//Sticker(not_null<Context*> context, DocumentData *document);
 
 	void initDimensions() override;
 
@@ -166,16 +153,17 @@ public:
 	void preload() const override;
 
 	void paint(Painter &p, const QRect &clip, const PaintContext *context) const override;
-	void getState(ClickHandlerPtr &link, HistoryCursorState &cursor, int x, int y) const override;
+	TextState getState(
+		QPoint point,
+		StateRequest request) const override;
 
 	// ClickHandlerHost interface
 	void clickHandlerActiveChanged(const ClickHandlerPtr &p, bool active) override;
 
 private:
-
 	QSize getThumbSize() const;
 
-	mutable FloatAnimation _a_over;
+	mutable Animation _a_over;
 	mutable bool _active = false;
 
 	mutable QPixmap _thumb;
@@ -186,15 +174,16 @@ private:
 
 class Video : public FileBase {
 public:
-	Video(Result *result);
+	Video(not_null<Context*> context, Result *result);
 
 	void initDimensions() override;
 
 	void paint(Painter &p, const QRect &clip, const PaintContext *context) const override;
-	void getState(ClickHandlerPtr &link, HistoryCursorState &cursor, int x, int y) const override;
+	TextState getState(
+		QPoint point,
+		StateRequest request) const override;
 
 private:
-
 	ClickHandlerPtr _link;
 
 	mutable QPixmap _thumb;
@@ -234,12 +223,14 @@ private:
 
 class File : public FileBase {
 public:
-	File(Result *result);
+	File(not_null<Context*> context, Result *result);
 
 	void initDimensions() override;
 
 	void paint(Painter &p, const QRect &clip, const PaintContext *context) const override;
-	void getState(ClickHandlerPtr &link, HistoryCursorState &cursor, int x, int y) const override;
+	TextState getState(
+		QPoint point,
+		StateRequest request) const override;
 
 	// ClickHandlerHost interface
 	void clickHandlerActiveChanged(const ClickHandlerPtr &p, bool active) override;
@@ -247,37 +238,36 @@ public:
 	~File();
 
 private:
-	void step_thumbOver(float64 ms, bool timer);
-	void step_radial(uint64 ms, bool timer);
+	void thumbAnimationCallback();
+	void step_radial(TimeMs ms, bool timer);
 
 	void ensureAnimation() const;
-	void checkAnimationFinished();
+	void checkAnimationFinished() const;
 	bool updateStatusText() const;
 
-	bool isRadialAnimation(uint64 ms) const {
+	bool isRadialAnimation(TimeMs ms) const {
 		if (!_animation || !_animation->radial.animating()) return false;
 
 		_animation->radial.step(ms);
 		return _animation && _animation->radial.animating();
 	}
-	bool isThumbAnimation(uint64 ms) const {
-		if (!_animation || !_animation->_a_thumbOver.animating()) return false;
-
-		_animation->_a_thumbOver.step(ms);
-		return _animation && _animation->_a_thumbOver.animating();
+	bool isThumbAnimation(TimeMs ms) const {
+		if (_animation) {
+			if (_animation->a_thumbOver.animating(ms)) {
+				return true;
+			}
+			checkAnimationFinished();
+		}
+		return false;
 	}
 
 	struct AnimationData {
-		AnimationData(AnimationCallbacks &&thumbOverCallbacks, AnimationCallbacks &&radialCallbacks) : a_thumbOver(0, 0)
-			, _a_thumbOver(std_::move(thumbOverCallbacks))
-			, radial(std_::move(radialCallbacks)) {
+		AnimationData(AnimationCallbacks &&radialCallbacks) : radial(std::move(radialCallbacks)) {
 		}
-		anim::fvalue a_thumbOver;
-		Animation _a_thumbOver;
-
-		RadialAnimation radial;
+		Animation a_thumbOver;
+		Ui::RadialAnimation radial;
 	};
-	mutable std_::unique_ptr<AnimationData> _animation;
+	mutable std::unique_ptr<AnimationData> _animation;
 
 	Text _title, _description;
 	ClickHandlerPtr _open, _cancel;
@@ -297,16 +287,16 @@ private:
 
 class Contact : public ItemBase {
 public:
-	Contact(Result *result);
+	Contact(not_null<Context*> context, Result *result);
 
 	void initDimensions() override;
-	int resizeGetHeight(int width) override;
 
 	void paint(Painter &p, const QRect &clip, const PaintContext *context) const override;
-	void getState(ClickHandlerPtr &link, HistoryCursorState &cursor, int x, int y) const override;
+	TextState getState(
+		QPoint point,
+		StateRequest request) const override;
 
 private:
-
 	mutable QPixmap _thumb;
 	Text _title, _description;
 
@@ -316,16 +306,17 @@ private:
 
 class Article : public ItemBase {
 public:
-	Article(Result *result, bool withThumb);
+	Article(not_null<Context*> context, Result *result, bool withThumb);
 
 	void initDimensions() override;
 	int resizeGetHeight(int width) override;
 
 	void paint(Painter &p, const QRect &clip, const PaintContext *context) const override;
-	void getState(ClickHandlerPtr &link, HistoryCursorState &cursor, int x, int y) const override;
+	TextState getState(
+		QPoint point,
+		StateRequest request) const override;
 
 private:
-
 	ClickHandlerPtr _url, _link;
 
 	bool _withThumb;
@@ -335,6 +326,37 @@ private:
 	int32 _urlWidth;
 
 	void prepareThumb(int width, int height) const;
+
+};
+
+class Game : public ItemBase {
+public:
+	Game(not_null<Context*> context, Result *result);
+
+	void setPosition(int32 position) override;
+	void initDimensions() override;
+
+	void paint(Painter &p, const QRect &clip, const PaintContext *context) const override;
+	TextState getState(
+		QPoint point,
+		StateRequest request) const override;
+
+private:
+	void countFrameSize();
+
+	void prepareThumb(int32 width, int32 height) const;
+
+	bool isRadialAnimation(TimeMs ms) const;
+	void step_radial(TimeMs ms, bool timer);
+
+	void clipCallback(Media::Clip::Notification notification);
+
+	Media::Clip::ReaderPointer _gif;
+	mutable QPixmap _thumb;
+	mutable std::unique_ptr<Ui::RadialAnimation> _radial;
+	Text _title, _description;
+
+	QSize _frameSize;
 
 };
 

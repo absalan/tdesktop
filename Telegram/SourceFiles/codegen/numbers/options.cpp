@@ -1,22 +1,9 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "codegen/numbers/options.h"
 
@@ -31,6 +18,7 @@ namespace {
 constexpr int kErrorOutputPathExpected      = 902;
 constexpr int kErrorInputPathExpected       = 903;
 constexpr int kErrorSingleInputPathExpected = 904;
+constexpr int kErrorWorkingPathExpected     = 905;
 
 } // namespace
 
@@ -38,9 +26,9 @@ using common::logError;
 
 Options parseOptions() {
 	Options result;
-	auto args(QCoreApplication::instance()->arguments());
-	for (int i = 1, count = args.size(); i < count; ++i) { // skip first
-		const auto &arg(args.at(i));
+	auto args = QCoreApplication::instance()->arguments();
+	for (auto i = 1, count = args.size(); i < count; ++i) { // skip first
+		auto &arg = args.at(i);
 
 		// Output path
 		if (arg == "-o") {
@@ -52,6 +40,17 @@ Options parseOptions() {
 			}
 		} else if (arg.startsWith("-o")) {
 			result.outputPath = arg.mid(2);
+
+		// Working path
+		} else if (arg == "-w") {
+			if (++i == count) {
+				logError(kErrorWorkingPathExpected, "Command Line") << "working path expected after -w";
+				return Options();
+			} else {
+				common::logSetWorkingPath(args.at(i));
+			}
+		} else if (arg.startsWith("-w")) {
+			common::logSetWorkingPath(arg.mid(2));
 
 		// Input path
 		} else {

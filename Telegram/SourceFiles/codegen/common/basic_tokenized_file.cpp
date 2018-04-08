@@ -1,22 +1,9 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "codegen/common/basic_tokenized_file.h"
 
@@ -51,8 +38,6 @@ bool isWhitespaceChar(char ch) {
 Token invalidToken() {
 	return { Type::Invalid, QString(), ConstUtf8String(nullptr, 0), false };
 }
-
-
 
 } // namespace
 
@@ -152,6 +137,22 @@ Type BasicTokenizedFile::uniteLastTokens(Type type) {
 	return type;
 }
 
+QString BasicTokenizedFile::getCurrentLineComment() {
+	if (lineNumber_ > singleLineComments_.size()) {
+		reader_.logError(kErrorInternal, lineNumber_) << "internal tokenizer error (line number larger than comments list size).";
+		failed_ = true;
+		return QString();
+	}
+	auto commentBytes = singleLineComments_[lineNumber_ - 1].mid(2); // Skip "//"
+	CheckedUtf8String comment(commentBytes);
+	if (!comment.isValid()) {
+		reader_.logError(kErrorIncorrectUtf8String, lineNumber_) << "incorrect UTF-8 string in the comment.";
+		failed_ = true;
+		return QString();
+	}
+	return comment.toString().trimmed();
+}
+
 Type BasicTokenizedFile::readNameOrNumber() {
 	while (!reader_.atEnd()) {
 		if (!isDigitChar(reader_.currentChar())) {
@@ -178,6 +179,9 @@ Type BasicTokenizedFile::readString() {
 	while (!reader_.atEnd()) {
 		auto ch = reader_.currentChar();
 		if (ch == '"') {
+			if (reader_.currentPtr() > offset) {
+				value.append(offset, reader_.currentPtr() - offset);
+			}
 			break;
 		}
 		if (ch == '\n') {
@@ -186,15 +190,15 @@ Type BasicTokenizedFile::readString() {
 			return Type::Invalid;
 		}
 		if (ch == '\\') {
+			if (reader_.currentPtr() > offset) {
+				value.append(offset, reader_.currentPtr() - offset);
+			}
 			reader_.skipChar();
 			ch = reader_.currentChar();
 			if (reader_.atEnd() || ch == '\n') {
 				reader_.logError(kErrorUnterminatedStringLiteral, lineNumber_) << "unterminated string literal.";
 				failed_ = true;
 				return Type::Invalid;
-			}
-			if (reader_.currentPtr() > offset + 1) {
-				value.append(offset, reader_.currentPtr() - offset - 1);
 			}
 			offset = reader_.currentPtr() + 1;
 			if (ch == 'n') {
@@ -206,8 +210,6 @@ Type BasicTokenizedFile::readString() {
 			} else if (ch == '\\') {
 				value.append('\\');
 			}
-		} else {
-			value.append(ch);
 		}
 		reader_.skipChar();
 	}

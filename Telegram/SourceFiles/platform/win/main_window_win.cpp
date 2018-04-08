@@ -1,32 +1,24 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#include "stdafx.h"
 #include "platform/win/main_window_win.h"
 
-#include "platform/win/windows_toasts.h"
+#include "styles/style_window.h"
+#include "platform/platform_notifications_manager.h"
 #include "platform/win/windows_dlls.h"
+#include "window/notifications_manager.h"
 #include "mainwindow.h"
+#include "messenger.h"
 #include "application.h"
-#include "lang.h"
-#include "localstorage.h"
+#include "lang/lang_keys.h"
+#include "storage/localstorage.h"
+#include "ui/widgets/popup_menu.h"
+#include "window/themes/window_theme.h"
+#include "history/history.h"
 
 #include <qpa/qplatformnativeinterface.h>
 
@@ -109,7 +101,7 @@ public:
 	using Change = MainWindow::ShadowsChange;
 	using Changes = MainWindow::ShadowsChanges;
 
-	_PsShadowWindows() : screenDC(0), max_w(0), max_h(0), _x(0), _y(0), _w(0), _h(0), hidden(true), r(0), g(0), b(0), noKeyColor(RGB(255, 255, 255)) {
+	_PsShadowWindows() : screenDC(0), noKeyColor(RGB(255, 255, 255)) {
 		for (int i = 0; i < 4; ++i) {
 			dcs[i] = 0;
 			bitmaps[i] = 0;
@@ -138,24 +130,15 @@ public:
 	}
 
 	bool init(QColor c) {
-		_fullsize = st::wndShadow.rect().width();
-		_shift = st::wndShadowShift;
-		QImage cornersImage(_fullsize, _fullsize, QImage::Format_ARGB32_Premultiplied);
+		_fullsize = st::windowShadow.width();
+		_shift = st::windowShadowShift;
+		auto cornersImage = QImage(_fullsize, _fullsize, QImage::Format_ARGB32_Premultiplied);
 		{
 			Painter p(&cornersImage);
-			p.drawSprite(0, 0, st::wndShadow);
+			p.setCompositionMode(QPainter::CompositionMode_Source);
+			st::windowShadow.paint(p, 0, 0, _fullsize, QColor(0, 0, 0));
 		}
 		if (rtl()) cornersImage = cornersImage.mirrored(true, false);
-		uchar *bits = cornersImage.bits();
-		if (bits) {
-			for (
-				quint32 *p = (quint32*)bits, *end = (quint32*)(bits + cornersImage.byteCount());
-				p < end;
-				++p
-				) {
-				*p = (*p ^ 0x00ffffff) << 24;
-			}
-		}
 
 		_metaSize = _fullsize + 2 * _shift;
 		_alphas.reserve(_metaSize);
@@ -198,9 +181,9 @@ public:
 
 		QRect avail(Sandbox::availableGeometry());
 		max_w = avail.width();
-		if (max_w < st::wndMinWidth) max_w = st::wndMinWidth;
+		accumulate_max(max_w, st::windowMinWidth);
 		max_h = avail.height();
-		if (max_h < st::wndMinHeight) max_h = st::wndMinHeight;
+		accumulate_max(max_h, st::titleHeight + st::windowMinHeight);
 
 		HINSTANCE appinst = (HINSTANCE)GetModuleHandle(0);
 		HWND hwnd = App::wnd() ? App::wnd()->psHwnd() : 0;
@@ -252,6 +235,12 @@ public:
 
 			SelectObject(dcs[i], bitmaps[i]);
 		}
+
+		QStringList alphasForLog;
+		for_const (auto alpha, _alphas) {
+			alphasForLog.append(QString::number(alpha));
+		}
+		LOG(("Window Shadow: %1").arg(alphasForLog.join(", ")));
 
 		initCorners();
 		return true;
@@ -350,7 +339,7 @@ public:
 			}
 			return;
 		}
-		if (!App::wnd()->psPosInited()) return;
+		if (!App::wnd()->positionInited()) return;
 
 		int x = _x, y = _y, w = _w, h = _h;
 		if (pos && (!(pos->flags & SWP_NOMOVE) || !(pos->flags & SWP_NOSIZE) || !(pos->flags & SWP_NOREPOSITION))) {
@@ -510,26 +499,25 @@ public:
 
 private:
 
-	int _x, _y, _w, _h;
-	int _metaSize, _fullsize, _size, _shift;
+	int _x = 0, _y = 0, _w = 0, _h = 0;
+	int _metaSize = 0, _fullsize = 0, _size = 0, _shift = 0;
 	QVector<BYTE> _alphas, _colors;
 
-	bool hidden;
+	bool hidden = true;
 
 	HWND hwnds[4];
 	HDC dcs[4], screenDC;
 	HBITMAP bitmaps[4];
-	int max_w, max_h;
+	int max_w = 0, max_h = 0;
 	BLENDFUNCTION blend;
 
-	BYTE r, g, b;
+	BYTE r = 0, g = 0, b = 0;
 	COLORREF noKeyColor;
 
-	static LRESULT CALLBACK _PsShadowWindows::wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+	static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 };
 _PsShadowWindows _psShadowWindows;
-QColor _shActive(0, 0, 0), _shInactive(0, 0, 0);
 
 LRESULT CALLBACK _PsShadowWindows::wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	auto wnd = App::wnd();
@@ -611,14 +599,15 @@ bool handleSessionNotification = false;
 UINT MainWindow::_taskbarCreatedMsgId = 0;
 
 MainWindow::MainWindow()
-: icon256(qsl(":/gui/art/icon256.png"))
-, iconbig256(qsl(":/gui/art/iconbig256.png"))
-, wndIcon(QPixmap::fromImage(icon256, Qt::ColorOnly))
-, ps_tbHider_hWnd(createTaskbarHider()) {
+: ps_tbHider_hWnd(createTaskbarHider()) {
 	if (!_taskbarCreatedMsgId) {
 		_taskbarCreatedMsgId = RegisterWindowMessage(L"TaskbarButtonCreated");
 	}
-	connect(&ps_cleanNotifyPhotosTimer, SIGNAL(timeout()), this, SLOT(psCleanNotifyPhotos()));
+	subscribe(Window::Theme::Background(), [this](const Window::Theme::BackgroundUpdate &update) {
+		if (update.paletteChanged()) {
+			_psShadowWindows.setColor(st::windowShadowFg->c);
+		}
+	});
 }
 
 void MainWindow::TaskbarCreated() {
@@ -633,45 +622,43 @@ void MainWindow::shadowsUpdate(ShadowsChanges changes, WINDOWPOS *position) {
 }
 
 void MainWindow::shadowsActivate() {
-	_psShadowWindows.setColor(_shActive);
+//	_psShadowWindows.setColor(_shActive);
 	shadowsUpdate(ShadowsChange::Activate);
 }
 
 void MainWindow::shadowsDeactivate() {
-	_psShadowWindows.setColor(_shInactive);
+//	_psShadowWindows.setColor(_shInactive);
 }
 
 void MainWindow::psShowTrayMenu() {
 	trayIconMenu->popup(QCursor::pos());
 }
 
-void MainWindow::psCleanNotifyPhotosIn(int32 dt) {
-	if (dt < 0) {
-		if (ps_cleanNotifyPhotosTimer.isActive() && ps_cleanNotifyPhotosTimer.remainingTime() <= -dt) return;
-		dt = -dt;
+int32 MainWindow::screenNameChecksum(const QString &name) const {
+	constexpr int DeviceNameSize = base::array_size(MONITORINFOEX().szDevice);
+	wchar_t buffer[DeviceNameSize] = { 0 };
+	if (name.size() < DeviceNameSize) {
+		name.toWCharArray(buffer);
+	} else {
+		memcpy(buffer, name.toStdWString().data(), sizeof(buffer));
 	}
-	ps_cleanNotifyPhotosTimer.start(dt);
-}
-
-void MainWindow::psCleanNotifyPhotos() {
-	auto ms = getms(true);
-	auto minuntil = Toasts::clearImages(ms);
-	if (minuntil) {
-		psCleanNotifyPhotosIn(int32(minuntil - ms));
-	}
+	return hashCrc32(buffer, sizeof(buffer));
 }
 
 void MainWindow::psRefreshTaskbarIcon() {
-	QWidget *w = new QWidget(this);
-	w->setWindowFlags(::operator|(Qt::Tool, Qt::FramelessWindowHint));
-	w->setGeometry(x() + 1, y() + 1, 1, 1);
-	QPalette p(w->palette());
-	p.setColor(QPalette::Background, st::titleBG->c);
-	QWindow *wnd = w->windowHandle();
-	w->setPalette(p);
-	w->show();
-	w->activateWindow();
-	delete w;
+	auto refresher = object_ptr<QWidget>(this);
+	auto guard = gsl::finally([&refresher] {
+		refresher.destroy();
+	});
+	refresher->setWindowFlags(static_cast<Qt::WindowFlags>(Qt::Tool) | Qt::FramelessWindowHint);
+	refresher->setGeometry(x() + 1, y() + 1, 1, 1);
+	auto palette = refresher->palette();
+	palette.setColor(QPalette::Background, (isActiveWindow() ? st::titleBgActive : st::titleBg)->c);
+	refresher->setPalette(palette);
+	refresher->show();
+	refresher->activateWindow();
+
+	updateIconCounters();
 }
 
 void MainWindow::psTrayMenuUpdated() {
@@ -681,7 +668,7 @@ void MainWindow::psSetupTrayIcon() {
 	if (!trayIcon) {
 		trayIcon = new QSystemTrayIcon(this);
 
-		QIcon icon(QPixmap::fromImage(App::wnd()->iconLarge(), Qt::ColorOnly));
+		auto icon = QIcon(App::pixmapFromImageInPlace(Messenger::Instance().logoNoMargin()));
 
 		trayIcon->setIcon(icon);
 		trayIcon->setToolTip(str_const_toString(AppName));
@@ -689,14 +676,21 @@ void MainWindow::psSetupTrayIcon() {
 		connect(trayIcon, SIGNAL(messageClicked()), this, SLOT(showFromTray()));
 		App::wnd()->updateTrayMenu();
 	}
-	psUpdateCounter();
+	updateIconCounters();
 
 	trayIcon->show();
-	psUpdateDelegate();
 }
 
-void MainWindow::psUpdateWorkmode() {
-	switch (cWorkMode()) {
+void MainWindow::showTrayTooltip() {
+	if (trayIcon && !cSeenTrayTooltip()) {
+		trayIcon->showMessage(str_const_toString(AppName), lang(lng_tray_icon_text), QSystemTrayIcon::Information, 10000);
+		cSetSeenTrayTooltip(true);
+		Local::writeSettings();
+	}
+}
+
+void MainWindow::workmodeUpdated(DBIWorkMode mode) {
+	switch (mode) {
 	case dbiwmWindowAndTray: {
 		psSetupTrayIcon();
 		HWND psOwner = (HWND)GetWindowLong(ps_hWnd, GWL_HWNDPARENT);
@@ -730,99 +724,55 @@ void MainWindow::psUpdateWorkmode() {
 	}
 }
 
-void MainWindow::psUpdateCounter() {
-	int32 counter = App::histories().unreadBadge();
-	bool muted = App::histories().unreadOnlyMuted();
+void MainWindow::unreadCounterChangedHook() {
+	setWindowTitle(titleText());
+	updateIconCounters();
+}
 
-	style::color bg = muted ? st::counterMuteBG : st::counterBG;
+void MainWindow::updateIconCounters() {
+	auto counter = App::histories().unreadBadge();
+	auto muted = App::histories().unreadOnlyMuted();
+
+	auto iconSizeSmall = QSize(GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));
+	auto iconSizeBig = QSize(GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON));
+
+	auto &bg = (muted ? st::trayCounterBgMute : st::trayCounterBg);
+	auto &fg = st::trayCounterFg;
+	auto iconSmallPixmap16 = App::pixmapFromImageInPlace(iconWithCounter(16, counter, bg, fg, true));
+	auto iconSmallPixmap32 = App::pixmapFromImageInPlace(iconWithCounter(32, counter, bg, fg, true));
 	QIcon iconSmall, iconBig;
-	iconSmall.addPixmap(QPixmap::fromImage(iconWithCounter(16, counter, bg, true), Qt::ColorOnly));
-	iconSmall.addPixmap(QPixmap::fromImage(iconWithCounter(32, counter, bg, true), Qt::ColorOnly));
-	iconBig.addPixmap(QPixmap::fromImage(iconWithCounter(32, taskbarList.Get() ? 0 : counter, bg, false), Qt::ColorOnly));
-	iconBig.addPixmap(QPixmap::fromImage(iconWithCounter(64, taskbarList.Get() ? 0 : counter, bg, false), Qt::ColorOnly));
+	iconSmall.addPixmap(iconSmallPixmap16);
+	iconSmall.addPixmap(iconSmallPixmap32);
+	iconBig.addPixmap(App::pixmapFromImageInPlace(iconWithCounter(32, taskbarList.Get() ? 0 : counter, bg, fg, false)));
+	iconBig.addPixmap(App::pixmapFromImageInPlace(iconWithCounter(64, taskbarList.Get() ? 0 : counter, bg, fg, false)));
 	if (trayIcon) {
-		trayIcon->setIcon(iconSmall);
+		// Force Qt to use right icon size, not the larger one.
+		QIcon forTrayIcon;
+		forTrayIcon.addPixmap(iconSizeSmall.width() >= 20 ? iconSmallPixmap32 : iconSmallPixmap16);
+		trayIcon->setIcon(forTrayIcon);
 	}
 
-	setWindowTitle((counter > 0) ? qsl("Telegram (%1)").arg(counter) : qsl("Telegram"));
 	psDestroyIcons();
-	ps_iconSmall = createHIconFromQIcon(iconSmall, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));
-	ps_iconBig = createHIconFromQIcon(iconBig, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON));
+	ps_iconSmall = createHIconFromQIcon(iconSmall, iconSizeSmall.width(), iconSizeSmall.height());
+	ps_iconBig = createHIconFromQIcon(iconBig, iconSizeBig.width(), iconSizeBig.height());
 	SendMessage(ps_hWnd, WM_SETICON, 0, (LPARAM)ps_iconSmall);
 	SendMessage(ps_hWnd, WM_SETICON, 1, (LPARAM)(ps_iconBig ? ps_iconBig : ps_iconSmall));
 	if (taskbarList.Get()) {
 		if (counter > 0) {
 			QIcon iconOverlay;
-			iconOverlay.addPixmap(QPixmap::fromImage(iconWithCounter(-16, counter, bg, false), Qt::ColorOnly));
-			iconOverlay.addPixmap(QPixmap::fromImage(iconWithCounter(-32, counter, bg, false), Qt::ColorOnly));
+			iconOverlay.addPixmap(App::pixmapFromImageInPlace(iconWithCounter(-16, counter, bg, fg, false)));
+			iconOverlay.addPixmap(App::pixmapFromImageInPlace(iconWithCounter(-32, counter, bg, fg, false)));
 			ps_iconOverlay = createHIconFromQIcon(iconOverlay, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));
 		}
-		QString description = counter > 0 ? QString("%1 unread messages").arg(counter) : qsl("No unread messages");
+		auto description = (counter > 0) ? lng_unread_bar(lt_count, counter) : QString();
 		taskbarList->SetOverlayIcon(ps_hWnd, ps_iconOverlay, description.toStdWString().c_str());
 	}
 	SetWindowPos(ps_hWnd, 0, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-void MainWindow::psUpdateDelegate() {
-}
-
-namespace {
-HMONITOR enumMonitor = 0;
-RECT enumMonitorWork;
-
-BOOL CALLBACK _monitorEnumProc(
-	_In_  HMONITOR hMonitor,
-	_In_  HDC hdcMonitor,
-	_In_  LPRECT lprcMonitor,
-	_In_  LPARAM dwData
-) {
-	MONITORINFOEX info;
-	info.cbSize = sizeof(info);
-	GetMonitorInfo(hMonitor, &info);
-	if (dwData == hashCrc32(info.szDevice, sizeof(info.szDevice))) {
-		enumMonitor = hMonitor;
-		enumMonitorWork = info.rcWork;
-		return FALSE;
-	}
-	return TRUE;
-}
-} // namespace
-
-void MainWindow::psInitSize() {
-	setMinimumWidth(st::wndMinWidth);
-	setMinimumHeight(st::wndMinHeight);
-
-	TWindowPos pos(cWindowPos());
-	QRect avail(Sandbox::availableGeometry());
-	bool maximized = false;
-	QRect geom(avail.x() + (avail.width() - st::wndDefWidth) / 2, avail.y() + (avail.height() - st::wndDefHeight) / 2, st::wndDefWidth, st::wndDefHeight);
-	if (pos.w && pos.h) {
-		if (pos.y < 0) pos.y = 0;
-		enumMonitor = 0;
-		EnumDisplayMonitors(0, 0, &_monitorEnumProc, pos.moncrc);
-		if (enumMonitor) {
-			int32 w = enumMonitorWork.right - enumMonitorWork.left, h = enumMonitorWork.bottom - enumMonitorWork.top;
-			if (w >= st::wndMinWidth && h >= st::wndMinHeight) {
-				if (pos.w > w) pos.w = w;
-				if (pos.h > h) pos.h = h;
-				pos.x += enumMonitorWork.left;
-				pos.y += enumMonitorWork.top;
-				if (pos.x < enumMonitorWork.right - 10 && pos.y < enumMonitorWork.bottom - 10) {
-					geom = QRect(pos.x, pos.y, pos.w, pos.h);
-				}
-			}
-		}
-		maximized = pos.maximized;
-	}
-	setGeometry(geom);
-}
-
-void MainWindow::psInitFrameless() {
-	psUpdatedPositionTimer.setSingleShot(true);
-	connect(&psUpdatedPositionTimer, SIGNAL(timeout()), this, SLOT(psSavePosition()));
-
-	QPlatformNativeInterface *i = QGuiApplication::platformNativeInterface();
-	ps_hWnd = static_cast<HWND>(i->nativeResourceForWindow(QByteArrayLiteral("handle"), windowHandle()));
+void MainWindow::initHook() {
+	auto platformInterface = QGuiApplication::platformNativeInterface();
+	ps_hWnd = static_cast<HWND>(platformInterface->nativeResourceForWindow(QByteArrayLiteral("handle"), windowHandle()));
 
 	if (!ps_hWnd) return;
 
@@ -831,67 +781,12 @@ void MainWindow::psInitFrameless() {
 		Dlls::WTSRegisterSessionNotification(ps_hWnd, NOTIFY_FOR_THIS_SESSION);
 	}
 
-//	RegisterApplicationRestart(NULL, 0);
-	Toasts::start();
-
 	psInitSysMenu();
-}
-
-void MainWindow::psSavePosition(Qt::WindowState state) {
-	if (state == Qt::WindowActive) state = windowHandle()->windowState();
-	if (state == Qt::WindowMinimized || !posInited) return;
-
-	TWindowPos pos(cWindowPos()), curPos = pos;
-
-	if (state == Qt::WindowMaximized) {
-		curPos.maximized = 1;
-	} else {
-		RECT w;
-		GetWindowRect(ps_hWnd, &w);
-		curPos.x = w.left;
-		curPos.y = w.top;
-		curPos.w = w.right - w.left;
-		curPos.h = w.bottom - w.top;
-		curPos.maximized = 0;
-	}
-
-	HMONITOR hMonitor = MonitorFromWindow(ps_hWnd, MONITOR_DEFAULTTONEAREST);
-	if (hMonitor) {
-		MONITORINFOEX info;
-		info.cbSize = sizeof(info);
-		GetMonitorInfo(hMonitor, &info);
-		if (!curPos.maximized) {
-			curPos.x -= info.rcWork.left;
-			curPos.y -= info.rcWork.top;
-		}
-		curPos.moncrc = hashCrc32(info.szDevice, sizeof(info.szDevice));
-	}
-
-	if (curPos.w >= st::wndMinWidth && curPos.h >= st::wndMinHeight) {
-		if (curPos.x != pos.x || curPos.y != pos.y || curPos.w != pos.w || curPos.h != pos.h || curPos.moncrc != pos.moncrc || curPos.maximized != pos.maximized) {
-			cSetWindowPos(curPos);
-			Local::writeSettings();
-		}
-	}
-}
-
-void MainWindow::psUpdatedPosition() {
-	psUpdatedPositionTimer.start(SaveWindowPositionTimeout);
-}
-
-bool MainWindow::psHasNativeNotifications() {
-	return Toasts::supported();
 }
 
 Q_DECLARE_METATYPE(QMargins);
 void MainWindow::psFirstShow() {
-	if (Toasts::supported()) {
-		cSetCustomNotifies(!cWindowsNotifications());
-	} else {
-		cSetCustomNotifies(true);
-	}
-
-	_psShadowWindows.init(_shActive);
+	_psShadowWindows.init(st::windowShadowFg->c);
 	_shadowsWorking = true;
 
 	psUpdateMargins();
@@ -901,12 +796,14 @@ void MainWindow::psFirstShow() {
 
 	show();
 	if (cWindowPos().maximized) {
+		DEBUG_LOG(("Window Pos: First show, setting maximized."));
 		setWindowState(Qt::WindowMaximized);
 	}
 
-	if ((cLaunchMode() == LaunchModeAutoStart && cStartMinimized()) || cStartInTray()) {
+	if ((cLaunchMode() == LaunchModeAutoStart && cStartMinimized() && !App::passcoded()) || cStartInTray()) {
+		DEBUG_LOG(("Window Pos: First show, setting minimized after."));
 		setWindowState(Qt::WindowMinimized);
-		if (cWorkMode() == dbiwmTrayOnly || cWorkMode() == dbiwmWindowAndTray) {
+		if (Global::WorkMode().value() == dbiwmTrayOnly || Global::WorkMode().value() == dbiwmWindowAndTray) {
 			hide();
 		} else {
 			show();
@@ -916,23 +813,23 @@ void MainWindow::psFirstShow() {
 		show();
 	}
 
-	posInited = true;
+	setPositionInited();
 	if (showShadows) {
 		shadowsUpdate(ShadowsChange::Moved | ShadowsChange::Resized | ShadowsChange::Shown);
 	}
 }
 
-bool MainWindow::psHandleTitle() {
-	return true;
+void MainWindow::stateChangedHook(Qt::WindowState state) {
+	updateSystemMenu(state);
 }
 
 void MainWindow::psInitSysMenu() {
 	Qt::WindowStates states = windowState();
 	ps_menu = GetSystemMenu(ps_hWnd, FALSE);
-	psUpdateSysMenu(windowHandle()->windowState());
+	updateSystemMenu(windowHandle()->windowState());
 }
 
-void MainWindow::psUpdateSysMenu(Qt::WindowState state) {
+void MainWindow::updateSystemMenu(Qt::WindowState state) {
 	if (!ps_menu) return;
 
 	int menuToDisable = SC_RESTORE;
@@ -1023,18 +920,6 @@ void MainWindow::psUpdateMargins() {
 	}
 }
 
-void MainWindow::psFlash() {
-	if (GetForegroundWindow() == ps_hWnd) return;
-
-	FLASHWINFO info;
-	info.cbSize = sizeof(info);
-	info.hwnd = ps_hWnd;
-	info.dwFlags = FLASHW_ALL;
-	info.dwTimeout = 0;
-	info.uCount = 1;
-	FlashWindowEx(&info);
-}
-
 HWND MainWindow::psHwnd() const {
 	return ps_hWnd;
 }
@@ -1068,32 +953,11 @@ MainWindow::~MainWindow() {
 
 	if (taskbarList) taskbarList.Reset();
 
-	Toasts::finish();
-
 	_shadowsWorking = false;
 	if (ps_menu) DestroyMenu(ps_menu);
 	psDestroyIcons();
 	_psShadowWindows.destroy();
 	if (ps_tbHider_hWnd) DestroyWindow(ps_tbHider_hWnd);
-}
-
-void MainWindow::psActivateNotify(NotifyWindow *w) {
-}
-
-void MainWindow::psClearNotifies(PeerId peerId) {
-	Toasts::clearNotifies(peerId);
-}
-
-void MainWindow::psNotifyShown(NotifyWindow *w) {
-}
-
-void MainWindow::psPlatformNotify(HistoryItem *item, int32 fwdCount) {
-	QString title = (!App::passcoded() && cNotifyView() <= dbinvShowName) ? item->history()->peer->name : qsl("Telegram Desktop");
-	QString subtitle = (!App::passcoded() && cNotifyView() <= dbinvShowName) ? item->notificationHeader() : QString();
-	bool showpix = (!App::passcoded() && cNotifyView() <= dbinvShowName);
-	QString msg = (!App::passcoded() && cNotifyView() <= dbinvShowPreview) ? (fwdCount < 2 ? item->notificationText() : lng_forward_messages(lt_count, fwdCount)) : lang(lng_notification_preview);
-
-	Toasts::create(item->history()->peer, item->id, showpix, title, subtitle, msg);
 }
 
 } // namespace Platform

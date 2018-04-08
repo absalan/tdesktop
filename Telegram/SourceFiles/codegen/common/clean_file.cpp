@@ -1,22 +1,9 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "codegen/common/clean_file.h"
 
@@ -86,10 +73,17 @@ bool CleanFile::read() {
 			offset = ch;
 		}
 	};
-	auto feedComment = [this, &offset, end](const char *ch) {
+
+	auto lineNumber = 0;
+	auto feedComment = [this, &offset, end, &lineNumber](const char *ch, bool save = false) {
 		if (ch > offset) {
-//			comments_.push_back({ content_.size(), QByteArray(offset, ch - offset) });
-			if (result_.isEmpty()) result_.reserve(end - offset - 2);
+			if (save) {
+				singleLineComments_.resize(lineNumber + 1);
+				singleLineComments_[lineNumber] = QByteArray(offset, ch - offset);
+			}
+			if (result_.isEmpty()) {
+				result_.reserve(end - offset - 2);
+			}
 			result_.append(' ');
 			offset = ch;
 		}
@@ -105,6 +99,9 @@ bool CleanFile::read() {
 			}
 		}
 		if (insideString) {
+			if (currentChar == '\n') {
+				++lineNumber;
+			}
 			++ch;
 			continue;
 		}
@@ -114,12 +111,14 @@ bool CleanFile::read() {
 			insideComment = InsideComment::SingleLine;
 			ch += 2;
 		} else if (insideComment == InsideComment::SingleLine && currentChar == '\r' && nextChar == '\n') {
-			feedComment(ch);
+			feedComment(ch, true);
 			ch += 2;
+			++lineNumber;
 			insideComment = InsideComment::None;
 		} else if (insideComment == InsideComment::SingleLine && currentChar == '\n') {
-			feedComment(ch);
+			feedComment(ch, true);
 			++ch;
+			++lineNumber;
 			insideComment = InsideComment::None;
 		} else if (insideComment == InsideComment::None && currentChar == '/' && nextChar == '*') {
 			feedContent(ch);
@@ -132,15 +131,21 @@ bool CleanFile::read() {
 		} else if (insideComment == InsideComment::MultiLine && currentChar == '\r' && nextChar == '\n') {
 			feedComment(ch);
 			ch += 2;
+			++lineNumber;
 			feedContent(ch);
 		} else if (insideComment == InsideComment::MultiLine && currentChar == '\n') {
 			feedComment(ch);
 			++ch;
+			++lineNumber;
 			feedContent(ch);
 		} else {
+			if (currentChar == '\n') {
+				++lineNumber;
+			}
 			++ch;
 		}
 	}
+	singleLineComments_.resize(lineNumber + 1);
 
 	if (insideComment == InsideComment::MultiLine) {
 		common::logError(kErrorUnexpectedEndOfFile, filepath_);
@@ -154,6 +159,10 @@ bool CleanFile::read() {
 		}
 	}
 	return true;
+}
+
+QVector<QByteArray> CleanFile::singleLineComments() const {
+	return singleLineComments_;
 }
 
 LogStream CleanFile::logError(int code, int line) const {

@@ -1,30 +1,19 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "window/main_window.h"
-
+#include "platform/platform_main_window.h"
+#include "base/flags.h"
 #include <windows.h>
 
-class NotifyWindow;
+namespace Ui {
+class PopupMenu;
+} // namespace Ui
 
 namespace Platform {
 
@@ -34,45 +23,17 @@ class MainWindow : public Window::MainWindow {
 public:
 	MainWindow();
 
-	int32 psResizeRowWidth() const {
-		return 0;//st::wndResizeAreaWidth;
-	}
-
-	void psInitFrameless();
-	void psInitSize();
 	HWND psHwnd() const;
 	HMENU psMenu() const;
 
 	void psFirstShow();
 	void psInitSysMenu();
-	void psUpdateSysMenu(Qt::WindowState state);
+	void updateSystemMenu(Qt::WindowState state);
 	void psUpdateMargins();
-	void psUpdatedPosition();
-
-	bool psHandleTitle();
-
-	void psFlash();
-	void psNotifySettingGot();
-
-	void psUpdateWorkmode();
 
 	void psRefreshTaskbarIcon();
 
-	bool psPosInited() const {
-		return posInited;
-	}
-
-	void psActivateNotify(NotifyWindow *w);
-	void psClearNotifies(PeerId peerId = 0);
-	void psNotifyShown(NotifyWindow *w);
-	void psPlatformNotify(HistoryItem *item, int32 fwdCount);
-
-	void psUpdateCounter();
-
-	bool psHasNativeNotifications();
-	void psCleanNotifyPhotosIn(int32 dt);
-
-	virtual QImage iconWithCounter(int size, int count, style::color bg, bool smallIcon) = 0;
+	virtual QImage iconWithCounter(int size, int count, style::color bg, style::color fg, bool smallIcon) = 0;
 
 	static UINT TaskbarCreatedMsgId() {
 		return _taskbarCreatedMsgId;
@@ -81,13 +42,14 @@ public:
 
 	// Custom shadows.
 	enum class ShadowsChange {
-		Moved    = 0x01,
-		Resized  = 0x02,
-		Shown    = 0x04,
-		Hidden   = 0x08,
-		Activate = 0x10,
+		Moved    = (1 << 0),
+		Resized  = (1 << 1),
+		Shown    = (1 << 2),
+		Hidden   = (1 << 3),
+		Activate = (1 << 4),
 	};
-	Q_DECLARE_FLAGS(ShadowsChanges, ShadowsChange);
+	using ShadowsChanges = base::flags<ShadowsChange>;
+	friend inline constexpr auto is_flag_type(ShadowsChange) { return true; };
 
 	bool shadowsWorking() const {
 		return _shadowsWorking;
@@ -106,31 +68,35 @@ public:
 	~MainWindow();
 
 public slots:
-
-	void psUpdateDelegate();
-	void psSavePosition(Qt::WindowState state = Qt::WindowActive);
 	void psShowTrayMenu();
 
-	void psCleanNotifyPhotos();
-
 protected:
+	void initHook() override;
+	int32 screenNameChecksum(const QString &name) const override;
+	void unreadCounterChangedHook() override;
 
-	bool psHasTrayIcon() const {
+	void stateChangedHook(Qt::WindowState state) override;
+
+	bool hasTrayIcon() const override {
 		return trayIcon;
 	}
 
-	bool posInited = false;
 	QSystemTrayIcon *trayIcon = nullptr;
-	PopupMenu *trayIconMenu = nullptr;
-	QImage icon256, iconbig256;
-	QIcon wndIcon;
+	Ui::PopupMenu *trayIconMenu = nullptr;
 
 	void psTrayMenuUpdated();
 	void psSetupTrayIcon();
+	virtual void placeSmallCounter(QImage &img, int size, int count, style::color bg, const QPoint &shift, style::color color) = 0;
+
+	void showTrayTooltip() override;
+
+	void workmodeUpdated(DBIWorkMode mode) override;
 
 	QTimer psUpdatedPositionTimer;
 
 private:
+	void updateIconCounters();
+
 	void psDestroyIcons();
 
 	static UINT _taskbarCreatedMsgId;
@@ -145,13 +111,9 @@ private:
 	HICON ps_iconSmall = nullptr;
 	HICON ps_iconOverlay = nullptr;
 
-	SingleTimer ps_cleanNotifyPhotosTimer;
-
 	int _deltaLeft = 0;
 	int _deltaTop = 0;
 
 };
-
-Q_DECLARE_OPERATORS_FOR_FLAGS(MainWindow::ShadowsChanges);
 
 } // namespace Platform

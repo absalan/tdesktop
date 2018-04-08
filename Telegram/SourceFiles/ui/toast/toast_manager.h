@@ -1,26 +1,14 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
 #include "ui/toast/toast.h"
+#include "core/single_timer.h"
 
 namespace Ui {
 namespace Toast {
@@ -36,25 +24,28 @@ public:
 
 	static Manager *instance(QWidget *parent);
 
-	void addToast(std_::unique_ptr<Instance> &&toast);
+	void addToast(std::unique_ptr<Instance> &&toast);
 
 	~Manager();
+
+protected:
+	bool eventFilter(QObject *o, QEvent *e);
 
 private slots:
 	void onHideTimeout();
 	void onToastWidgetDestroyed(QObject *widget);
-	void onToastWidgetParentResized();
 
 private:
 	Manager(QWidget *parent);
 	void startNextHideTimer();
 
 	SingleTimer _hideTimer;
-	uint64 _nextHide = 0;
+	TimeMs _nextHide = 0;
 
-	QMultiMap<uint64, Instance*> _toastByHideTime;
+	QMultiMap<TimeMs, Instance*> _toastByHideTime;
 	QMap<Widget*, Instance*> _toastByWidget;
 	QList<Instance*> _toasts;
+	OrderedSet<QPointer<QWidget>> _toastParents;
 
 };
 

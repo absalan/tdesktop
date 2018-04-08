@@ -1,22 +1,9 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
@@ -25,6 +12,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "core/click_handler.h"
 #include "ui/text/text_entity.h"
 #include "ui/emoji_config.h"
+#include "base/flags.h"
 
 static const QChar TextCommand(0x0010);
 enum TextCommands {
@@ -38,8 +26,6 @@ enum TextCommands {
 	TextCommandNoSemibold  = 0x08,
 	TextCommandLinkIndex   = 0x09, // 0 - NoLink
 	TextCommandLinkText    = 0x0A,
-	TextCommandColor       = 0x0B,
-	TextCommandNoColor     = 0x0C,
 	TextCommandSkipBlock   = 0x0D,
 
 	TextCommandLangTag     = 0x20,
@@ -67,8 +53,8 @@ struct TextSelection {
 	constexpr bool empty() const {
 		return from == to;
 	}
-	uint16 from : 16;
-	uint16 to : 16;
+	uint16 from;
+	uint16 to;
 };
 inline bool operator==(TextSelection a, TextSelection b) {
 	return a.from == b.from && a.to == b.to;
@@ -85,9 +71,8 @@ typedef QMap<QChar, TextCustomTag> TextCustomTagsMap;
 class ITextBlock;
 class Text {
 public:
-
 	Text(int32 minResizeWidth = QFIXED_MAX);
-	Text(style::font font, const QString &text, const TextParseOptions &options = _defaultOptions, int32 minResizeWidth = QFIXED_MAX, bool richText = false);
+	Text(const style::TextStyle &st, const QString &text, const TextParseOptions &options = _defaultOptions, int32 minResizeWidth = QFIXED_MAX, bool richText = false);
 	Text(const Text &other);
 	Text(Text &&other);
 	Text &operator=(const Text &other);
@@ -96,16 +81,16 @@ public:
 	int countWidth(int width) const;
 	int countHeight(int width) const;
 	void countLineWidths(int width, QVector<int> *lineWidths) const;
-	void setText(style::font font, const QString &text, const TextParseOptions &options = _defaultOptions);
-	void setRichText(style::font font, const QString &text, TextParseOptions options = _defaultOptions, const TextCustomTagsMap &custom = TextCustomTagsMap());
-	void setMarkedText(style::font font, const TextWithEntities &textWithEntities, const TextParseOptions &options = _defaultOptions);
+	void setText(const style::TextStyle &st, const QString &text, const TextParseOptions &options = _defaultOptions);
+	void setRichText(const style::TextStyle &st, const QString &text, TextParseOptions options = _defaultOptions, const TextCustomTagsMap &custom = TextCustomTagsMap());
+	void setMarkedText(const style::TextStyle &st, const TextWithEntities &textWithEntities, const TextParseOptions &options = _defaultOptions);
 
 	void setLink(uint16 lnkIndex, const ClickHandlerPtr &lnk);
 	bool hasLinks() const;
 
 	bool hasSkipBlock() const;
-	void setSkipBlock(int32 width, int32 height);
-	void removeSkipBlock();
+	bool updateSkipBlock(int width, int height);
+	bool removeSkipBlock();
 
 	int32 maxWidth() const {
 		return _maxWidth.ceil().toInt();
@@ -114,30 +99,29 @@ public:
 		return _minHeight;
 	}
 
-	void replaceFont(style::font f); // does not recount anything, use at your own risk!
-
-	void draw(QPainter &p, int32 left, int32 top, int32 width, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, TextSelection selection = { 0, 0 }, bool fullWidthSelection = true) const;
-	void drawElided(QPainter &p, int32 left, int32 top, int32 width, int32 lines = 1, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, int32 removeFromEnd = 0, bool breakEverywhere = false, TextSelection selection = { 0, 0 }) const;
-	void drawLeft(QPainter &p, int32 left, int32 top, int32 width, int32 outerw, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, TextSelection selection = { 0, 0 }) const {
+	void draw(Painter &p, int32 left, int32 top, int32 width, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, TextSelection selection = { 0, 0 }, bool fullWidthSelection = true) const;
+	void drawElided(Painter &p, int32 left, int32 top, int32 width, int32 lines = 1, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, int32 removeFromEnd = 0, bool breakEverywhere = false, TextSelection selection = { 0, 0 }) const;
+	void drawLeft(Painter &p, int32 left, int32 top, int32 width, int32 outerw, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, TextSelection selection = { 0, 0 }) const {
 		draw(p, rtl() ? (outerw - left - width) : left, top, width, align, yFrom, yTo, selection);
 	}
-	void drawLeftElided(QPainter &p, int32 left, int32 top, int32 width, int32 outerw, int32 lines = 1, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, int32 removeFromEnd = 0, bool breakEverywhere = false, TextSelection selection = { 0, 0 }) const {
+	void drawLeftElided(Painter &p, int32 left, int32 top, int32 width, int32 outerw, int32 lines = 1, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, int32 removeFromEnd = 0, bool breakEverywhere = false, TextSelection selection = { 0, 0 }) const {
 		drawElided(p, rtl() ? (outerw - left - width) : left, top, width, lines, align, yFrom, yTo, removeFromEnd, breakEverywhere, selection);
 	}
-	void drawRight(QPainter &p, int32 right, int32 top, int32 width, int32 outerw, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, TextSelection selection = { 0, 0 }) const {
+	void drawRight(Painter &p, int32 right, int32 top, int32 width, int32 outerw, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, TextSelection selection = { 0, 0 }) const {
 		draw(p, rtl() ? right : (outerw - right - width), top, width, align, yFrom, yTo, selection);
 	}
-	void drawRightElided(QPainter &p, int32 right, int32 top, int32 width, int32 outerw, int32 lines = 1, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, int32 removeFromEnd = 0, bool breakEverywhere = false, TextSelection selection = { 0, 0 }) const {
+	void drawRightElided(Painter &p, int32 right, int32 top, int32 width, int32 outerw, int32 lines = 1, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, int32 removeFromEnd = 0, bool breakEverywhere = false, TextSelection selection = { 0, 0 }) const {
 		drawElided(p, rtl() ? right : (outerw - right - width), top, width, lines, align, yFrom, yTo, removeFromEnd, breakEverywhere, selection);
 	}
 
 	struct StateRequest {
 		enum class Flag {
-			BreakEverywhere = 0x01,
-			LookupSymbol    = 0x02,
-			LookupLink      = 0x04,
+			BreakEverywhere = (1 << 0),
+			LookupSymbol    = (1 << 1),
+			LookupLink      = (1 << 2),
 		};
-		Q_DECLARE_FLAGS(Flags, Flag);
+		using Flags = base::flags<Flag>;
+		friend inline constexpr auto is_flag_type(Flag) { return true; };
 
 		StateRequest() {
 		}
@@ -151,9 +135,9 @@ public:
 		bool afterSymbol = false;
 		uint16 symbol = 0;
 	};
-	StateResult getState(int x, int y, int width, StateRequest request = StateRequest()) const;
-	StateResult getStateLeft(int x, int y, int width, int outerw, StateRequest request = StateRequest()) const {
-		return getState(rtl() ? (outerw - x - width) : x, y, width, request);
+	StateResult getState(QPoint point, int width, StateRequest request = StateRequest()) const;
+	StateResult getStateLeft(QPoint point, int width, int outerw, StateRequest request = StateRequest()) const {
+		return getState(rtlpoint(point, outerw), width, request);
 	}
 	struct StateRequestElided : public StateRequest {
 		StateRequestElided() {
@@ -163,21 +147,19 @@ public:
 		int lines = 1;
 		int removeFromEnd = 0;
     };
-	StateResult getStateElided(int x, int y, int width, StateRequestElided request = StateRequestElided()) const;
-	StateResult getStateElidedLeft(int x, int y, int width, int outerw, StateRequestElided request = StateRequestElided()) const {
-		return getStateElided(rtl() ? (outerw - x - width) : x, y, width, request);
+	StateResult getStateElided(QPoint point, int width, StateRequestElided request = StateRequestElided()) const;
+	StateResult getStateElidedLeft(QPoint point, int width, int outerw, StateRequestElided request = StateRequestElided()) const {
+		return getStateElided(rtlpoint(point, outerw), width, request);
 	}
 
-	TextSelection adjustSelection(TextSelection selection, TextSelectType selectType) const;
+	[[nodiscard]] TextSelection adjustSelection(TextSelection selection, TextSelectType selectType) const;
 	bool isFullSelection(TextSelection selection) const {
 		return (selection.from == 0) && (selection.to >= _text.size());
 	}
 
-	bool isEmpty() const {
-		return _text.isEmpty();
-	}
+	bool isEmpty() const;
 	bool isNull() const {
-		return !_font;
+		return !_st;
 	}
 	int length() const {
 		return _text.size();
@@ -206,11 +188,14 @@ public:
 	}
 
 	void clear();
-	~Text() {
-		clear();
-	}
+	~Text();
 
 private:
+	using TextBlocks = std::vector<std::unique_ptr<ITextBlock>>;
+	using TextLinks = QVector<ClickHandlerPtr>;
+
+	uint16 countBlockEnd(const TextBlocks::const_iterator &i, const TextBlocks::const_iterator &e) const;
+	uint16 countBlockLength(const Text::TextBlocks::const_iterator &i, const Text::TextBlocks::const_iterator &e) const;
 
 	// Template method for originalText(), originalTextWithEntities().
 	template <typename AppendPartCallback, typename ClickHandlerStartCallback, typename ClickHandlerFinishCallback, typename FlagsChangeCallback>
@@ -228,19 +213,17 @@ private:
 	// it is also called from move constructor / assignment operator
 	void clearFields();
 
-	QFixed _minResizeWidth, _maxWidth;
-	int32 _minHeight;
+	QFixed _minResizeWidth;
+	QFixed _maxWidth = 0;
+	int32 _minHeight = 0;
 
 	QString _text;
-	style::font _font;
+	const style::TextStyle *_st = nullptr;
 
-	typedef QVector<ITextBlock*> TextBlocks;
 	TextBlocks _blocks;
-
-	typedef QVector<ClickHandlerPtr> TextLinks;
 	TextLinks _links;
 
-	Qt::LayoutDirection _startDir;
+	Qt::LayoutDirection _startDir = Qt::LayoutDirectionAuto;
 
 	friend class TextParser;
 	friend class TextPainter;
@@ -249,29 +232,17 @@ private:
 inline TextSelection snapSelection(int from, int to) {
 	return { static_cast<uint16>(snap(from, 0, 0xFFFF)), static_cast<uint16>(snap(to, 0, 0xFFFF)) };
 }
+inline TextSelection shiftSelection(TextSelection selection, uint16 byLength) {
+	return snapSelection(int(selection.from) + byLength, int(selection.to) + byLength);
+}
+inline TextSelection unshiftSelection(TextSelection selection, uint16 byLength) {
+	return snapSelection(int(selection.from) - int(byLength), int(selection.to) - int(byLength));
+}
 inline TextSelection shiftSelection(TextSelection selection, const Text &byText) {
-	int len = byText.length();
-	return snapSelection(int(selection.from) + len, int(selection.to) + len);
+	return shiftSelection(selection, byText.length());
 }
 inline TextSelection unshiftSelection(TextSelection selection, const Text &byText) {
-	int len = byText.length();
-	return snapSelection(int(selection.from) - len, int(selection.to) - len);
-}
-
-void initLinkSets();
-const QSet<int32> &validProtocols();
-const QSet<int32> &validTopDomains();
-const QRegularExpression &reDomain();
-const QRegularExpression &reMailName();
-const QRegularExpression &reMailStart();
-const QRegularExpression &reHashtag();
-const QRegularExpression &reBotCommand();
-
-// text style
-const style::textStyle *textstyleCurrent();
-void textstyleSet(const style::textStyle *style);
-inline void textstyleRestore() {
-	textstyleSet(nullptr);
+	return unshiftSelection(selection, byText.length());
 }
 
 // textcmd
@@ -281,8 +252,6 @@ QString textcmdStartLink(const QString &url);
 QString textcmdStopLink();
 QString textcmdLink(ushort lnkIndex, const QString &text);
 QString textcmdLink(const QString &url, const QString &text);
-QString textcmdStartColor(const style::color &color);
-QString textcmdStopColor();
 QString textcmdStartSemibold();
 QString textcmdStopSemibold();
 const QChar *textSkipCommand(const QChar *from, const QChar *end, bool canLink = true);
@@ -291,11 +260,11 @@ inline bool chIsSpace(QChar ch, bool rich = false) {
 	return ch.isSpace() || (ch < 32 && !(rich && ch == TextCommand)) || (ch == QChar::ParagraphSeparator) || (ch == QChar::LineSeparator) || (ch == QChar::ObjectReplacementCharacter) || (ch == QChar::CarriageReturn) || (ch == QChar::Tabulation);
 }
 inline bool chIsDiac(QChar ch) { // diac and variation selectors
-	return (ch.category() == QChar::Mark_NonSpacing) || (ch.unicode() == 1652);
+	return (ch.category() == QChar::Mark_NonSpacing) || (ch == 1652) || (ch >= 64606 && ch <= 64611);
 }
-inline bool chIsBad(QChar ch) {
-	return (ch == 0) || (ch >= 8232 && ch < 8237) || (ch >= 65024 && ch < 65040 && ch != 65039) || (ch >= 127 && ch < 160 && ch != 156) || (cPlatform() == dbipMac && ch >= 0x0B00 && ch <= 0x0B7F && chIsDiac(ch) && cIsElCapitan()); // tmp hack see https://bugreports.qt.io/browse/QTBUG-48910
-}
+
+bool chIsBad(QChar ch);
+
 inline bool chIsTrimmed(QChar ch, bool rich = false) {
 	return (!rich || ch != TextCommand) && (chIsSpace(ch) || chIsBad(ch));
 }
@@ -402,13 +371,6 @@ inline bool chIsParagraphSeparator(QChar ch) {
 		break;
 	}
 	return false;
-}
-
-inline QString myUrlEncode(const QString &str) {
-	return QString::fromLatin1(QUrl::toPercentEncoding(str));
-}
-inline QString myUrlDecode(const QString &enc) {
-	return QUrl::fromPercentEncoding(enc.toUtf8());
 }
 
 void emojiDraw(QPainter &p, EmojiPtr e, int x, int y);

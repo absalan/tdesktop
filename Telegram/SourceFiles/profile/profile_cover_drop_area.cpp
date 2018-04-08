@@ -1,24 +1,10 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#include "stdafx.h"
 #include "profile/profile_cover_drop_area.h"
 
 #include "styles/style_profile.h"
@@ -39,7 +25,7 @@ void CoverDropArea::showAnimated() {
 }
 
 void CoverDropArea::hideAnimated(HideFinishCallback &&callback) {
-	_hideFinishCallback = std_::move(callback);
+	_hideFinishCallback = std::move(callback);
 	_hiding = true;
 	setupAnimation();
 }
@@ -57,7 +43,9 @@ void CoverDropArea::paintEvent(QPaintEvent *e) {
 		_cache = QPixmap();
 		if (_hiding) {
 			hide();
-			_hideFinishCallback.call(this);
+			if (_hideFinishCallback) {
+				_hideFinishCallback(this);
+			}
 			return;
 		}
 	}
@@ -90,10 +78,14 @@ void CoverDropArea::paintEvent(QPaintEvent *e) {
 
 void CoverDropArea::setupAnimation() {
 	if (_cache.isNull()) {
-		_cache = myGrab(this);
+		_cache = Ui::GrabWidget(this);
 	}
 	auto from = _hiding ? 1. : 0., to = _hiding ? 0. : 1.;
-	START_ANIMATION(_a_appearance, func(this, &CoverDropArea::refreshCallback), from, to, st::profileDropAreaDuration, anim::linear);
+	_a_appearance.start(
+		[this] { update(); },
+		from,
+		to,
+		st::profileDropAreaDuration);
 }
 
 } // namespace Profile

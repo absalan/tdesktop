@@ -1,28 +1,13 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
 #include "core/basic_types.h"
-#include "structs.h"
-#include "mtproto/core_types.h"
 
 class FileLoader;
 
@@ -43,10 +28,10 @@ private:
 
 public:
 
-	// Constructor is public only for std_::make_unique<>() to work.
+	// Constructor is public only for std::make_unique<>() to work.
 	// You should use create() static method instead.
 	explicit Result(const Creator &creator);
-	static std_::unique_ptr<Result> create(uint64 queryId, const MTPBotInlineResult &mtpData);
+	static std::unique_ptr<Result> create(uint64 queryId, const MTPBotInlineResult &mtpData);
 	Result(const Result &other) = delete;
 	Result &operator=(const Result &other) = delete;
 
@@ -67,7 +52,8 @@ public:
 
 	bool hasThumbDisplay() const;
 
-	void addToHistory(History *history, MTPDmessage::Flags flags, MsgId msgId, UserId fromId, MTPint mtpDate, UserId viaBotId, MsgId replyToId) const;
+	void addToHistory(History *history, MTPDmessage::Flags flags, MsgId msgId, UserId fromId, MTPint mtpDate, UserId viaBotId, MsgId replyToId, const QString &postAuthor) const;
+	QString getErrorOnSend(History *history) const;
 
 	// interface for Layout:: usage
 	bool getLocationCoords(LocationCoords *outLocation) const;
@@ -77,8 +63,12 @@ public:
 	~Result();
 
 private:
-	void createPhoto();
-	void createDocument();
+	void createGame();
+	QSize thumbBox() const;
+	MTPWebDocument adjustAttributes(const MTPWebDocument &document);
+	MTPVector<MTPDocumentAttribute> adjustAttributes(
+		const MTPVector<MTPDocumentAttribute> &document,
+		const MTPstring &mimeType);
 
 	enum class Type {
 		Unknown,
@@ -92,6 +82,7 @@ private:
 		Contact,
 		Geo,
 		Venue,
+		Game,
 	};
 
 	friend class internal::SendData;
@@ -104,20 +95,17 @@ private:
 	uint64 _queryId = 0;
 	QString _id;
 	Type _type = Type::Unknown;
-	QString _title, _description, _url, _thumb_url;
-	QString _content_type, _content_url;
-	int _width = 0;
-	int _height = 0;
-	int _duration = 0;
-
+	QString _title, _description, _url;
+	QString _content_url;
 	DocumentData *_document = nullptr;
 	PhotoData *_photo = nullptr;
+	GameData *_game = nullptr;
 
-	std_::unique_ptr<MTPReplyMarkup> _mtpKeyboard;
+	std::unique_ptr<MTPReplyMarkup> _mtpKeyboard;
 
 	ImagePtr _thumb, _locationThumb;
 
-	std_::unique_ptr<internal::SendData> sendData;
+	std::unique_ptr<internal::SendData> sendData;
 
 };
 
