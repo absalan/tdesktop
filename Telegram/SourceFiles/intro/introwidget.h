@@ -1,181 +1,255 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "mtproto/rpc_sender.h"
+#include "mtproto/sender.h"
 
-class IntroStep;
-class IntroWidget : public TWidget, public RPCSender {
+namespace Ui {
+class IconButton;
+class RoundButton;
+class LinkButton;
+class SlideAnimation;
+class CrossFadeAnimation;
+class FlatLabel;
+template <typename Widget>
+class FadeWrap;
+} // namespace Ui
+
+namespace Intro {
+
+class Widget : public TWidget, private MTP::Sender, private base::Subscriber {
 	Q_OBJECT
 
 public:
+	Widget(QWidget *parent);
 
-	IntroWidget(QWidget *window);
+	void showAnimated(const QPixmap &bgAnimCache, bool back = false);
 
+	void setInnerFocus();
+
+	~Widget();
+
+protected:
 	void paintEvent(QPaintEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
 	void keyPressEvent(QKeyEvent *e) override;
 
-	void updateAdaptiveLayout();
-
-	void animShow(const QPixmap &bgAnimCache, bool back = false);
-	void step_show(float64 ms, bool timer);
-	void stop_show();
-
-	void step_stage(float64 ms, bool timer);
-
-	QRect innerRect() const;
-	QString currentCountry() const;
-
-	enum CallStatusType {
-		CallWaiting,
-		CallCalling,
-		CallCalled,
-		CallDisabled,
-	};
-	struct CallStatus {
-		CallStatusType type;
-		int timeout;
-	};
-	void setPhone(const QString &phone, const QString &phone_hash, bool registered);
-	void setCode(const QString &code);
-	void setCallStatus(const CallStatus &status);
-	void setPwdSalt(const QByteArray &salt);
-	void setHasRecovery(bool hasRecovery);
-	void setPwdHint(const QString &hint);
-	void setCodeByTelegram(bool byTelegram);
-
-	const QString &getPhone() const;
-	const QString &getPhoneHash() const;
-	const QString &getCode() const;
-	const CallStatus &getCallStatus() const;
-	const QByteArray &getPwdSalt() const;
-	bool getHasRecovery() const;
-	const QString &getPwdHint() const;
-	bool codeByTelegram() const;
-
-	void finish(const MTPUser &user, const QImage &photo = QImage());
-
-	void rpcClear() override;
-	void langChangeTo(int32 langId);
-
-	void nextStep(IntroStep *step) {
-		pushStep(step, MoveForward);
-	}
-	void replaceStep(IntroStep *step) {
-		pushStep(step, MoveReplace);
-	}
-
-	~IntroWidget() override;
-
-public slots:
-
-	void onStepSubmit();
-	void onBack();
-	void onParentResize(const QSize &newSize);
-	void onChangeLang();
-
 signals:
-
 	void countryChanged();
 
+#ifndef TDESKTOP_DISABLE_AUTOUPDATE
+private slots:
+	void onCheckUpdateStatus();
+#endif // TDESKTOP_DISABLE_AUTOUPDATE
+
+	// Internal interface.
+public:
+	struct Data {
+		QString country;
+		QString phone;
+		QByteArray phoneHash;
+		bool phoneIsRegistered = false;
+
+		enum class CallStatus {
+			Waiting,
+			Calling,
+			Called,
+			Disabled,
+		};
+		CallStatus callStatus = CallStatus::Disabled;
+		int callTimeout = 0;
+
+		QString code;
+		int codeLength = 5;
+		bool codeByTelegram = false;
+
+		QByteArray pwdSalt;
+		bool hasRecovery = false;
+		QString pwdHint;
+
+		base::Observable<void> updated;
+
+	};
+
+	enum class Direction {
+		Back,
+		Forward,
+		Replace,
+	};
+	class Step : public TWidget, public RPCSender, protected base::Subscriber {
+	public:
+		Step(QWidget *parent, Data *data, bool hasCover = false);
+
+		virtual void setInnerFocus() {
+			setFocus();
+		}
+
+		void setGoCallback(base::lambda<void(Step *step, Direction direction)> callback);
+		void setShowResetCallback(base::lambda<void()> callback);
+
+		void prepareShowAnimated(Step *after);
+		void showAnimated(Direction direction);
+		void showFast();
+		bool animating() const;
+
+		bool hasCover() const;
+		virtual bool hasBack() const;
+		virtual void activate();
+		virtual void cancelled();
+		virtual void finished();
+
+		virtual void submit() = 0;
+		virtual QString nextButtonText() const;
+
+		int contentLeft() const;
+		int contentTop() const;
+
+		void setErrorCentered(bool centered);
+		void setErrorBelowLink(bool below);
+		void showError(base::lambda<QString()> textFactory);
+		void hideError() {
+			showError(base::lambda<QString()>());
+		}
+
+		~Step();
+
+	protected:
+		void paintEvent(QPaintEvent *e) override;
+		void resizeEvent(QResizeEvent *e) override;
+
+		void setTitleText(base::lambda<QString()> richTitleTextFactory);
+		void setDescriptionText(base::lambda<QString()> richDescriptionTextFactory);
+		bool paintAnimated(Painter &p, QRect clip);
+
+		void fillSentCodeData(const MTPauth_SentCodeType &type);
+
+		void showDescription();
+		void hideDescription();
+
+		Data *getData() const {
+			return _data;
+		}
+		void finish(const MTPUser &user, QImage &&photo = QImage());
+
+		void goBack() {
+			if (_goCallback) _goCallback(nullptr, Direction::Back);
+		}
+		void goNext(Step *step) {
+			if (_goCallback) _goCallback(step, Direction::Forward);
+		}
+		void goReplace(Step *step) {
+			if (_goCallback) _goCallback(step, Direction::Replace);
+		}
+		void showResetButton() {
+			if (_showResetCallback) _showResetCallback();
+		}
+
+	private:
+		struct CoverAnimation {
+			CoverAnimation() = default;
+			CoverAnimation(CoverAnimation &&other) = default;
+			CoverAnimation &operator=(CoverAnimation &&other) = default;
+			~CoverAnimation();
+
+			std::unique_ptr<Ui::CrossFadeAnimation> title;
+			std::unique_ptr<Ui::CrossFadeAnimation> description;
+
+			// From content top till the next button top.
+			QPixmap contentSnapshotWas;
+			QPixmap contentSnapshotNow;
+		};
+		void updateLabelsPosition();
+		void paintContentSnapshot(Painter &p, const QPixmap &snapshot, float64 alpha, float64 howMuchHidden);
+		void refreshError();
+		void refreshTitle();
+		void refreshDescription();
+		void refreshLang();
+
+		CoverAnimation prepareCoverAnimation(Step *step);
+		QPixmap prepareContentSnapshot();
+		QPixmap prepareSlideAnimation();
+		void showFinished();
+
+		void prepareCoverMask();
+		void paintCover(Painter &p, int top);
+
+		Data *_data = nullptr;
+		bool _hasCover = false;
+		base::lambda<void(Step *step, Direction direction)> _goCallback;
+		base::lambda<void()> _showResetCallback;
+
+		object_ptr<Ui::FlatLabel> _title;
+		base::lambda<QString()> _titleTextFactory;
+		object_ptr<Ui::FadeWrap<Ui::FlatLabel>> _description;
+		base::lambda<QString()> _descriptionTextFactory;
+
+		bool _errorCentered = false;
+		bool _errorBelowLink = false;
+		base::lambda<QString()> _errorTextFactory;
+		object_ptr<Ui::FadeWrap<Ui::FlatLabel>> _error = { nullptr };
+
+		Animation _a_show;
+		CoverAnimation _coverAnimation;
+		std::unique_ptr<Ui::SlideAnimation> _slideAnimation;
+		QPixmap _coverMask;
+
+	};
+
 private:
+	void refreshLang();
+	void animationCallback();
+	void createLanguageLink();
 
-	QPixmap grabStep(int skip = 0);
+	void updateControlsGeometry();
+	Data *getData() {
+		return &_data;
+	}
 
-	int _langChangeTo = 0;
+	void fixOrder();
+	void showControls();
+	void hideControls();
+	QRect calculateStepRect() const;
 
-	Animation _a_stage;
-	QPixmap _cacheHide, _cacheShow;
-	int _cacheHideIndex = 0;
-	int _cacheShowIndex = 0;
-	anim::ivalue a_coordHide, a_coordShow;
-	anim::fvalue a_opacityHide, a_opacityShow;
+	void showResetButton();
+	void resetAccount();
 
-	Animation _a_show;
-	QPixmap _cacheUnder, _cacheOver;
-	anim::ivalue a_coordUnder, a_coordOver;
-	anim::fvalue a_shadow;
-
-	QVector<IntroStep*> _stepHistory;
-	IntroStep *step(int skip = 0) {
-		t_assert(_stepHistory.size() + skip > 0);
+	Step *getStep(int skip = 0) {
+		Assert(_stepHistory.size() + skip > 0);
 		return _stepHistory.at(_stepHistory.size() - skip - 1);
 	}
-	enum MoveType {
-		MoveBack,
-		MoveForward,
-		MoveReplace,
-	};
-	void historyMove(MoveType type);
-	void pushStep(IntroStep *step, MoveType type);
+	void historyMove(Direction direction);
+	void moveToStep(Step *step, Direction direction);
+	void appendStep(Step *step);
 
-	void gotNearestDC(const MTPNearestDc &dc);
+	void getNearestDC();
 
-	QString _countryForReg;
+	Animation _a_show;
+	bool _showBack = false;
+	QPixmap _cacheUnder, _cacheOver;
 
-	QString _phone, _phone_hash;
-	CallStatus _callStatus = { CallDisabled, 0 };
-	bool _registered = false;
+	QVector<Step*> _stepHistory;
 
-	QString _code;
+	Data _data;
 
-	QByteArray _pwdSalt;
-	bool _hasRecovery = false;
-	bool _codeByTelegram = false;
-	QString _pwdHint;
+	Animation _coverShownAnimation;
+	int _nextTopFrom = 0;
+	int _controlsTopFrom = 0;
 
-	QString _firstname, _lastname;
+	object_ptr<Ui::FadeWrap<Ui::IconButton>> _back;
+	object_ptr<Ui::FadeWrap<Ui::RoundButton>> _update = { nullptr };
+	object_ptr<Ui::FadeWrap<Ui::RoundButton>> _settings;
 
-	IconedButton _back;
-	float64 _backFrom = 0.;
-	float64 _backTo = 0.;
+	object_ptr<Ui::RoundButton> _next;
+	object_ptr<Ui::FadeWrap<Ui::LinkButton>> _changeLanguage = { nullptr };
+	object_ptr<Ui::FadeWrap<Ui::RoundButton>> _resetAccount = { nullptr };
 
-};
-
-class IntroStep : public TWidget, public RPCSender {
-public:
-
-	IntroStep(IntroWidget *parent) : TWidget(parent) {
-	}
-
-	virtual bool hasBack() const {
-		return false;
-	}
-	virtual void activate() {
-		show();
-	}
-	virtual void cancelled() {
-	}
-	virtual void finished() {
-		hide();
-	}
-	virtual void onSubmit() = 0;
-
-protected:
-
-	IntroWidget *intro() {
-		IntroWidget *result = qobject_cast<IntroWidget*>(parentWidget());
-		t_assert(result != nullptr);
-		return result;
-	}
+	mtpRequestId _resetRequest = 0;
 
 };
+
+} // namespace Intro

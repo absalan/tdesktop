@@ -1,22 +1,9 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "codegen/style/processor.h"
 
@@ -25,7 +12,6 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "codegen/common/cpp_file.h"
 #include "codegen/style/parsed_file.h"
 #include "codegen/style/generator.h"
-#include "codegen/style/sprite_generator.h"
 
 namespace codegen {
 namespace style {
@@ -50,14 +36,7 @@ int Processor::launch() {
 	}
 
 	auto module = parser_->getResult();
-	if (options_.rebuildDependencies) {
-		bool result = module->enumIncludes([this](const structure::Module &included) -> bool {
-			return write(included);
-		});
-		if (!result) {
-			return -1;
-		}
-	} else if (!write(*module)) {
+	if (!write(*module)) {
 		return -1;
 	}
 
@@ -65,6 +44,7 @@ int Processor::launch() {
 }
 
 bool Processor::write(const structure::Module &module) const {
+	bool forceReGenerate = false;
 	QDir dir(options_.outputPath);
 	if (!dir.mkpath(".")) {
 		common::logError(kErrorCantWritePath, "Command Line") << "can not open path for writing: " << dir.absolutePath().toStdString();
@@ -72,29 +52,21 @@ bool Processor::write(const structure::Module &module) const {
 	}
 
 	QFileInfo srcFile(module.filepath());
-	QString dstFilePath = dir.absolutePath() + '/' + destFileBaseName(module);
+	QString dstFilePath = dir.absolutePath() + '/' + (options_.isPalette ? "palette" : destFileBaseName(module));
 
-	bool forceReGenerate = false;// !options_.rebuildDependencies;
 	common::ProjectInfo project = {
 		"codegen_style",
 		srcFile.fileName(),
-		"stdafx.h",
 		forceReGenerate
 	};
 
-	SpriteGenerator spriteGenerator(module, forceReGenerate);
-	if (!spriteGenerator.writeSprites()) {
-		return false;
-	}
-
-	Generator generator(module, dstFilePath, project);
+	Generator generator(module, dstFilePath, project, options_.isPalette);
 	if (!generator.writeHeader()) {
 		return false;
 	}
 	if (!generator.writeSource()) {
 		return false;
 	}
-
 	return true;
 }
 

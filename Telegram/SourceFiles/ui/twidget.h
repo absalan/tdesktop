@@ -1,31 +1,111 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-namespace App {
-	const QPixmap &sprite();
-}
+#include "base/flags.h"
 
 namespace Fonts {
-	void start();
+
+void Start();
+QString GetOverride(const QString &familyName);
+
+} // namespace
+
+class TWidget;
+
+template <typename Object>
+class object_ptr;
+
+namespace Ui {
+
+inline bool InFocusChain(not_null<const QWidget*> widget) {
+	if (auto top = widget->window()) {
+		if (auto focused = top->focusWidget()) {
+			return !widget->isHidden()
+				&& (focused == widget
+					|| widget->isAncestorOf(focused));
+		}
+	}
+	return false;
+}
+
+template <typename ChildWidget>
+inline ChildWidget *AttachParentChild(
+		not_null<QWidget*> parent,
+		const object_ptr<ChildWidget> &child) {
+	if (auto raw = child.data()) {
+		raw->setParent(parent);
+		raw->show();
+		return raw;
+	}
+	return nullptr;
+}
+
+void SendPendingMoveResizeEvents(not_null<QWidget*> target);
+
+QPixmap GrabWidget(
+	not_null<TWidget*> target,
+	QRect rect = QRect(),
+	QColor bg = QColor(255, 255, 255, 0));
+QImage GrabWidgetToImage(
+	not_null<TWidget*> target,
+	QRect rect = QRect(),
+	QColor bg = QColor(255, 255, 255, 0));
+
+} // namespace Ui
+
+enum class RectPart {
+	None        = 0,
+
+	TopLeft     = (1 << 0),
+	Top         = (1 << 1),
+	TopRight    = (1 << 2),
+	Left        = (1 << 3),
+	Center      = (1 << 4),
+	Right       = (1 << 5),
+	BottomLeft  = (1 << 6),
+	Bottom      = (1 << 7),
+	BottomRight = (1 << 8),
+
+	FullTop     = TopLeft | Top | TopRight,
+	NoTopBottom = Left | Center | Right,
+	FullBottom  = BottomLeft | Bottom | BottomRight,
+	NoTop       = NoTopBottom | FullBottom,
+	NoBottom    = FullTop | NoTopBottom,
+
+	FullLeft    = TopLeft | Left | BottomLeft,
+	NoLeftRight = Top | Center | Bottom,
+	FullRight   = TopRight | Right | BottomRight,
+	NoLeft      = NoLeftRight | FullRight,
+	NoRight     = FullLeft | NoLeftRight,
+
+	AllCorners = TopLeft | TopRight | BottomLeft | BottomRight,
+	AllSides   = Top | Bottom | Left | Right,
+
+	Full        = FullTop | NoTop,
+};
+using RectParts = base::flags<RectPart>;
+inline constexpr auto is_flag_type(RectPart) { return true; };
+
+inline bool IsTopCorner(RectPart corner) {
+	return (corner == RectPart::TopLeft) || (corner == RectPart::TopRight);
+}
+
+inline bool IsBottomCorner(RectPart corner) {
+	return (corner == RectPart::BottomLeft) || (corner == RectPart::BottomRight);
+}
+
+inline bool IsLeftCorner(RectPart corner) {
+	return (corner == RectPart::TopLeft) || (corner == RectPart::BottomLeft);
+}
+
+inline bool IsRightCorner(RectPart corner) {
+	return (corner == RectPart::TopRight) || (corner == RectPart::BottomRight);
 }
 
 class Painter : public QPainter {
@@ -79,271 +159,449 @@ public:
 	void drawPixmapRight(const QPoint &p, int outerw, const QPixmap &pix) {
 		return drawPixmapRight(p.x(), p.y(), outerw, pix);
 	}
-	void drawSprite(int x, int y, const style::sprite &sprite) {
-		return drawPixmap(QPoint(x, y), App::sprite(), sprite.rect());
+
+	void setTextPalette(const style::TextPalette &palette) {
+		_textPalette = &palette;
 	}
-	void drawSprite(const QPoint &p, const style::sprite &sprite) {
-		return drawPixmap(p, App::sprite(), sprite.rect());
+	void restoreTextPalette() {
+		_textPalette = nullptr;
 	}
-	void drawSpriteLeft(int x, int y, int outerw, const style::sprite &sprite) {
-		return drawPixmapLeft(x, y, outerw, App::sprite(), sprite.rect());
+	const style::TextPalette &textPalette() const {
+		return _textPalette ? *_textPalette : st::defaultTextPalette;
 	}
-	void drawSpriteLeft(const QPoint &p, int outerw, const style::sprite &sprite) {
-		return drawPixmapLeft(p, outerw, App::sprite(), sprite.rect());
-	}
-	void drawSpriteLeft(int x, int y, int w, int h, int outerw, const style::sprite &sprite) {
-		return drawPixmapLeft(x, y, w, h, outerw, App::sprite(), sprite.rect());
-	}
-	void drawSpriteLeft(const QRect &r, int outerw, const style::sprite &sprite) {
-		return drawPixmapLeft(r, outerw, App::sprite(), sprite.rect());
-	}
-	void drawSpriteRight(int x, int y, int outerw, const style::sprite &sprite) {
-		return drawPixmapRight(x, y, outerw, App::sprite(), sprite.rect());
-	}
-	void drawSpriteRight(const QPoint &p, int outerw, const style::sprite &sprite) {
-		return drawPixmapRight(p, outerw, App::sprite(), sprite.rect());
-	}
-	void drawSpriteRight(int x, int y, int w, int h, int outerw, const style::sprite &sprite) {
-		return drawPixmapRight(x, y, w, h, outerw, App::sprite(), sprite.rect());
-	}
-	void drawSpriteRight(const QRect &r, int outerw, const style::sprite &sprite) {
-		return drawPixmapRight(r, outerw, App::sprite(), sprite.rect());
-	}
-	void drawSpriteCenter(const QRect &in, const style::sprite &sprite) {
-		return drawPixmap(QPoint(in.x() + (in.width() - sprite.pxWidth()) / 2, in.y() + (in.height() - sprite.pxHeight()) / 2), App::sprite(), sprite.rect());
-	}
-	void drawSpriteCenterLeft(const QRect &in, int outerw, const style::sprite &sprite) {
-		return drawPixmapLeft(QPoint(in.x() + (in.width() - sprite.pxWidth()) / 2, in.y() + (in.height() - sprite.pxHeight()) / 2), outerw, App::sprite(), sprite.rect());
-	}
-	void drawSpriteCenterRight(const QRect &in, int outerw, const style::sprite &sprite) {
-		return drawPixmapRight(QPoint(in.x() + (in.width() - sprite.pxWidth()) / 2, in.y() + (in.height() - sprite.pxHeight()) / 2), outerw, App::sprite(), sprite.rect());
-	}
+
+private:
+	const style::TextPalette *_textPalette = nullptr;
+
 };
 
-#define T_WIDGET public: \
-TWidget *tparent() { \
-return qobject_cast<TWidget*>(parentWidget()); \
-} \
-const TWidget *tparent() const { \
-	return qobject_cast<const TWidget*>(parentWidget()); \
-} \
-virtual void leaveToChildEvent(QEvent *e, QWidget *child) { /* e -- from enterEvent() of child TWidget */ \
-} \
-virtual void enterFromChildEvent(QEvent *e, QWidget *child) { /* e -- from leaveEvent() of child TWidget */ \
-} \
-void moveToLeft(int x, int y, int outerw = 0) { \
-	move(rtl() ? ((outerw > 0 ? outerw : parentWidget()->width()) - x - width()) : x, y); \
-} \
-void moveToRight(int x, int y, int outerw = 0) { \
-	move(rtl() ? x : ((outerw > 0 ? outerw : parentWidget()->width()) - x - width()), y); \
-} \
-QPoint myrtlpoint(int x, int y) const { \
-	return rtlpoint(x, y, width()); \
-} \
-QPoint myrtlpoint(const QPoint p) const { \
-	return rtlpoint(p, width()); \
-} \
-QRect myrtlrect(int x, int y, int w, int h) const { \
-	return rtlrect(x, y, w, h, width()); \
-} \
-QRect myrtlrect(const QRect &r) { \
-	return rtlrect(r, width()); \
-} \
-void rtlupdate(const QRect &r) { \
-	update(myrtlrect(r)); \
-} \
-void rtlupdate(int x, int y, int w, int h) { \
-	update(myrtlrect(x, y, w, h)); \
-} \
-protected: \
-void enterEvent(QEvent *e) override { \
-	TWidget *p(tparent()); \
-	if (p) p->leaveToChildEvent(e, this); \
-	return enterEventHook(e); \
-} \
-void leaveEvent(QEvent *e) override { \
-	TWidget *p(tparent()); \
-	if (p) p->enterFromChildEvent(e, this); \
-	return leaveEventHook(e); \
-}
+class PainterHighQualityEnabler {
+public:
+	PainterHighQualityEnabler(Painter &p) : _painter(p) {
+		static constexpr QPainter::RenderHint Hints[] = {
+			QPainter::Antialiasing,
+			QPainter::SmoothPixmapTransform,
+			QPainter::TextAntialiasing,
+			QPainter::HighQualityAntialiasing
+		};
 
-class TWidget : public QWidget {
+		auto hints = _painter.renderHints();
+		for_const (auto hint, Hints) {
+			if (!(hints & hint)) {
+				_hints |= hint;
+			}
+		}
+		if (_hints) {
+			_painter.setRenderHints(_hints);
+		}
+	}
+	PainterHighQualityEnabler(const PainterHighQualityEnabler &other) = delete;
+	PainterHighQualityEnabler &operator=(const PainterHighQualityEnabler &other) = delete;
+	~PainterHighQualityEnabler() {
+		if (_hints) {
+			_painter.setRenderHints(_hints, false);
+		}
+	}
+
+private:
+	Painter &_painter;
+	QPainter::RenderHints _hints = 0;
+
+};
+
+template <typename Base>
+class TWidgetHelper : public Base {
+public:
+	using Base::Base;
+
+	virtual QMargins getMargins() const {
+		return QMargins();
+	}
+
+	void moveToLeft(int x, int y, int outerw = 0) {
+		auto margins = getMargins();
+		x -= margins.left();
+		y -= margins.top();
+		Base::move(rtl() ? ((outerw > 0 ? outerw : Base::parentWidget()->width()) - x - Base::width()) : x, y);
+	}
+	void moveToRight(int x, int y, int outerw = 0) {
+		auto margins = getMargins();
+		x -= margins.right();
+		y -= margins.top();
+		Base::move(rtl() ? x : ((outerw > 0 ? outerw : Base::parentWidget()->width()) - x - Base::width()), y);
+	}
+	void setGeometryToLeft(int x, int y, int w, int h, int outerw = 0) {
+		auto margins = getMargins();
+		x -= margins.left();
+		y -= margins.top();
+		w -= margins.left() - margins.right();
+		h -= margins.top() - margins.bottom();
+		Base::setGeometry(rtl() ? ((outerw > 0 ? outerw : Base::parentWidget()->width()) - x - w) : x, y, w, h);
+	}
+	void setGeometryToRight(int x, int y, int w, int h, int outerw = 0) {
+		auto margins = getMargins();
+		x -= margins.right();
+		y -= margins.top();
+		w -= margins.left() - margins.right();
+		h -= margins.top() - margins.bottom();
+		Base::setGeometry(rtl() ? x : ((outerw > 0 ? outerw : Base::parentWidget()->width()) - x - w), y, w, h);
+	}
+	QPoint myrtlpoint(int x, int y) const {
+		return rtlpoint(x, y, Base::width());
+	}
+	QPoint myrtlpoint(const QPoint point) const {
+		return rtlpoint(point, Base::width());
+	}
+	QRect myrtlrect(int x, int y, int w, int h) const {
+		return rtlrect(x, y, w, h, Base::width());
+	}
+	QRect myrtlrect(const QRect &rect) const {
+		return rtlrect(rect, Base::width());
+	}
+	void rtlupdate(const QRect &rect) {
+		Base::update(myrtlrect(rect));
+	}
+	void rtlupdate(int x, int y, int w, int h) {
+		Base::update(myrtlrect(x, y, w, h));
+	}
+
+	QPoint mapFromGlobal(const QPoint &point) const {
+		return Base::mapFromGlobal(point);
+	}
+	QPoint mapToGlobal(const QPoint &point) const {
+		return Base::mapToGlobal(point);
+	}
+	QRect mapFromGlobal(const QRect &rect) const {
+		return QRect(mapFromGlobal(rect.topLeft()), rect.size());
+	}
+	QRect mapToGlobal(const QRect &rect) const {
+		return QRect(mapToGlobal(rect.topLeft()), rect.size());
+	}
+
+protected:
+	void enterEvent(QEvent *e) final override {
+		if (auto parent = tparent()) {
+			parent->leaveToChildEvent(e, this);
+		}
+		return enterEventHook(e);
+	}
+	virtual void enterEventHook(QEvent *e) {
+		return Base::enterEvent(e);
+	}
+
+	void leaveEvent(QEvent *e) final override {
+		if (auto parent = tparent()) {
+			parent->enterFromChildEvent(e, this);
+		}
+		return leaveEventHook(e);
+	}
+	virtual void leaveEventHook(QEvent *e) {
+		return Base::leaveEvent(e);
+	}
+
+	// e - from enterEvent() of child TWidget
+	virtual void leaveToChildEvent(QEvent *e, QWidget *child) {
+	}
+
+	// e - from leaveEvent() of child TWidget
+	virtual void enterFromChildEvent(QEvent *e, QWidget *child) {
+	}
+
+private:
+	TWidget *tparent() {
+		return qobject_cast<TWidget*>(Base::parentWidget());
+	}
+	const TWidget *tparent() const {
+		return qobject_cast<const TWidget*>(Base::parentWidget());
+	}
+
+	template <typename OtherBase>
+	friend class TWidgetHelper;
+
+};
+
+class TWidget : public TWidgetHelper<QWidget> {
 	Q_OBJECT
-	T_WIDGET
 
 public:
-	TWidget(QWidget *parent = nullptr) : QWidget(parent) {
-	}
-	bool event(QEvent *e) override {
-		return QWidget::event(e);
+	TWidget(QWidget *parent = nullptr) : TWidgetHelper<QWidget>(parent) {
 	}
 	virtual void grabStart() {
 	}
 	virtual void grabFinish() {
 	}
 
-	bool inFocusChain() const;
+	bool inFocusChain() const {
+		return Ui::InFocusChain(this);
+	}
 
 	void hideChildren() {
 		for (auto child : children()) {
-			if (auto widget = qobject_cast<QWidget*>(child)) {
-				widget->hide();
+			if (child->isWidgetType()) {
+				static_cast<QWidget*>(child)->hide();
 			}
 		}
 	}
 	void showChildren() {
 		for (auto child : children()) {
-			if (auto widget = qobject_cast<QWidget*>(child)) {
-				widget->show();
+			if (child->isWidgetType()) {
+				static_cast<QWidget*>(child)->show();
 			}
 		}
 	}
 
-	virtual ~TWidget() {
+	// Get the size of the widget as it should be.
+	// Negative return value means no default width.
+	virtual int naturalWidth() const {
+		return -1;
 	}
 
-protected:
-	void enterEventHook(QEvent *e) {
-		return QWidget::enterEvent(e);
-	}
-	void leaveEventHook(QEvent *e) {
-		return QWidget::leaveEvent(e);
-	}
-
-};
-
-void myEnsureResized(QWidget *target);
-QPixmap myGrab(TWidget *target, QRect rect = QRect());
-
-class PlainShadow : public TWidget {
-public:
-	PlainShadow(QWidget *parent, const style::color &color) : TWidget(parent), _color(color) {
-	}
-
-protected:
-	void paintEvent(QPaintEvent *e) override {
-		Painter(this).fillRect(e->rect(), _color->b);
-	}
-
-private:
-	const style::color &_color;
-
-};
-
-class ToggleableShadow : public TWidget {
-public:
-	ToggleableShadow(QWidget *parent, const style::color &color) : TWidget(parent), _color(color) {
-	}
-
-	enum class Mode {
-		Shown,
-		ShownFast,
-		Hidden,
-		HiddenFast
-	};
-	void setMode(Mode mode);
-
-	bool isFullyShown() const {
-		return _shown && _a_opacity.isNull();
-	}
-
-protected:
-	void paintEvent(QPaintEvent *e) override;
-
-private:
-	void repaintCallback() {
-		update();
-	}
-
-	const style::color &_color;
-	FloatAnimation _a_opacity;
-	bool _shown = true;
-
-};
-
-class SingleDelayedCall : public QObject {
-	Q_OBJECT
-
-public:
-	SingleDelayedCall(QObject *parent, const char *member) : QObject(parent), _pending(false), _member(member) {
-	}
-	void call() {
-		if (!_pending) {
-			_pending = true;
-			QMetaObject::invokeMethod(this, "makeDelayedCall", Qt::QueuedConnection);
+	// Count new height for width=newWidth and resize to it.
+	void resizeToWidth(int newWidth) {
+		auto margins = getMargins();
+		auto fullWidth = margins.left() + newWidth + margins.right();
+		auto fullHeight = margins.top() + resizeGetHeight(newWidth) + margins.bottom();
+		auto newSize = QSize(fullWidth, fullHeight);
+		if (newSize != size()) {
+			resize(newSize);
+			update();
 		}
 	}
 
-private slots:
-	void makeDelayedCall() {
-		_pending = false;
-		QMetaObject::invokeMethod(parent(), _member);
+	// Resize to minimum of natural width and available width.
+	void resizeToNaturalWidth(int newWidth) {
+		auto maxWidth = naturalWidth();
+		resizeToWidth((maxWidth >= 0) ? qMin(newWidth, maxWidth) : newWidth);
 	}
 
-private:
-	bool _pending;
-	const char *_member;
+	QRect rectNoMargins() const {
+		return rect().marginsRemoved(getMargins());
+	}
+
+	int widthNoMargins() const {
+		return rectNoMargins().width();
+	}
+
+	int heightNoMargins() const {
+		return rectNoMargins().height();
+	}
+
+	int bottomNoMargins() const {
+		auto rectWithoutMargins = rectNoMargins();
+		return y() + rectWithoutMargins.y() + rectWithoutMargins.height();
+	}
+
+	QSize sizeNoMargins() const {
+		return rectNoMargins().size();
+	}
+
+	// Updates the area that is visible inside the scroll container.
+	void setVisibleTopBottom(int visibleTop, int visibleBottom) {
+		auto max = height();
+		visibleTopBottomUpdated(
+			snap(visibleTop, 0, max),
+			snap(visibleBottom, 0, max));
+	}
+
+signals:
+	// Child widget is responsible for emitting this signal.
+	void heightUpdated();
+
+protected:
+	void setChildVisibleTopBottom(
+			TWidget *child,
+			int visibleTop,
+			int visibleBottom) {
+		if (child) {
+			auto top = child->y();
+			child->setVisibleTopBottom(
+				visibleTop - top,
+				visibleBottom - top);
+		}
+	}
+
+	// Resizes content and counts natural widget height for the desired width.
+	virtual int resizeGetHeight(int newWidth) {
+		return heightNoMargins();
+	}
+
+	virtual void visibleTopBottomUpdated(
+		int visibleTop,
+		int visibleBottom) {
+	}
 
 };
 
-// A simple wrap around T* to explicitly state ownership
-template <typename T>
-class ChildWidget {
+template <typename Widget>
+QPointer<Widget> make_weak(Widget *object) {
+	return QPointer<Widget>(object);
+}
+
+template <typename Widget>
+QPointer<const Widget> make_weak(const Widget *object) {
+	return QPointer<const Widget>(object);
+}
+
+template <typename Widget>
+QPointer<Widget> make_weak(not_null<Widget*> object) {
+	return QPointer<Widget>(object.get());
+}
+
+template <typename Widget>
+QPointer<const Widget> make_weak(not_null<const Widget*> object) {
+	return QPointer<const Widget>(object.get());
+}
+
+class SingleQueuedInvokation : public QObject {
 public:
-	ChildWidget(std::nullptr_t) : _widget(nullptr) {
+	SingleQueuedInvokation(base::lambda<void()> callback) : _callback(callback) {
+	}
+	void call() {
+		if (_pending.testAndSetAcquire(0, 1)) {
+			InvokeQueued(this, [this] {
+				if (_pending.testAndSetRelease(1, 0)) {
+					_callback();
+				}
+			});
+		}
+	}
+
+private:
+	base::lambda<void()> _callback;
+	QAtomicInt _pending = { 0 };
+
+};
+
+// Smart pointer for QObject*, has move semantics, destroys object if it doesn't have a parent.
+template <typename Object>
+class object_ptr {
+public:
+	object_ptr(std::nullptr_t) noexcept {
 	}
 
 	// No default constructor, but constructors with at least
 	// one argument are simply make functions.
 	template <typename Parent, typename... Args>
-	ChildWidget(Parent &&parent, Args&&... args) : _widget(new T(std_::forward<Parent>(parent), std_::forward<Args>(args)...)) {
+	explicit object_ptr(Parent &&parent, Args&&... args)
+	: _object(new Object(std::forward<Parent>(parent), std::forward<Args>(args)...)) {
+	}
+	static object_ptr<Object> fromRaw(Object *value) noexcept {
+		object_ptr<Object> result = { nullptr };
+		result._object = value;
+		return result;
 	}
 
-	ChildWidget(const ChildWidget<T> &other) = delete;
-	ChildWidget<T> &operator=(const ChildWidget<T> &other) = delete;
-
-	ChildWidget<T> &operator=(std::nullptr_t) {
-		_widget = nullptr;
+	object_ptr(const object_ptr &other) = delete;
+	object_ptr &operator=(const object_ptr &other) = delete;
+	object_ptr(object_ptr &&other) noexcept : _object(base::take(other._object)) {
+	}
+	object_ptr &operator=(object_ptr &&other) noexcept {
+		auto temp = std::move(other);
+		destroy();
+		std::swap(_object, temp._object);
 		return *this;
 	}
-	ChildWidget<T> &operator=(T *widget) {
-		_widget = widget;
+
+	template <
+		typename OtherObject,
+		typename = std::enable_if_t<
+			std::is_base_of_v<Object, OtherObject>>>
+	object_ptr(object_ptr<OtherObject> &&other) noexcept
+	: _object(base::take(other._object)) {
+	}
+
+	template <
+		typename OtherObject,
+		typename = std::enable_if_t<
+			std::is_base_of_v<Object, OtherObject>>>
+	object_ptr &operator=(object_ptr<OtherObject> &&other) noexcept {
+		_object = base::take(other._object);
 		return *this;
 	}
 
-	T *operator->() const {
-		return _widget;
-	}
-	T &operator*() const {
-		return *_widget;
+	object_ptr &operator=(std::nullptr_t) noexcept {
+		_object = nullptr;
+		return *this;
 	}
 
 	// So we can pass this pointer to methods like connect().
-	operator T*() const {
-		return _widget;
+	Object *data() const noexcept {
+		return static_cast<Object*>(_object.data());
+	}
+	operator Object*() const noexcept {
+		return data();
 	}
 
-	void destroy() {
-		if (_widget) {
-			delete _widget;
-			_widget = nullptr;
-		}
+	explicit operator bool() const noexcept {
+		return _object != nullptr;
+	}
+
+	Object *operator->() const noexcept {
+		return data();
+	}
+	Object &operator*() const noexcept {
+		return *data();
+	}
+
+	// Use that instead "= new Object(parent, ...)"
+	template <typename Parent, typename... Args>
+	Object *create(Parent &&parent, Args&&... args) {
+		destroy();
+		_object = new Object(
+			std::forward<Parent>(parent),
+			std::forward<Args>(args)...);
+		return data();
+	}
+	void destroy() noexcept {
+		delete base::take(_object);
 	}
 	void destroyDelayed() {
-		if (_widget) {
-			_widget->hide();
-			_widget->deleteLater();
-			_widget = nullptr;
+		if (_object) {
+			if (auto widget = base::up_cast<QWidget*>(data())) {
+				widget->hide();
+			}
+			base::take(_object)->deleteLater();
 		}
 	}
 
+	~object_ptr() noexcept {
+		if (auto pointer = _object) {
+			if (!pointer->parent()) {
+				destroy();
+			}
+		}
+	}
+
+	template <typename ResultType, typename SourceType>
+	friend object_ptr<ResultType> static_object_cast(
+		object_ptr<SourceType> source);
+
 private:
-	T *_widget;
+	template <typename OtherObject>
+	friend class object_ptr;
+
+	QPointer<QObject> _object;
 
 };
 
-void sendSynteticMouseEvent(QWidget *widget, QEvent::Type type, Qt::MouseButton button, const QPoint &globalPoint);
+template <typename ResultType, typename SourceType>
+inline object_ptr<ResultType> static_object_cast(
+		object_ptr<SourceType> source) {
+	auto result = object_ptr<ResultType>(nullptr);
+	result._object = static_cast<ResultType*>(
+		base::take(source._object).data());
+	return std::move(result);
+}
 
-inline void sendSynteticMouseEvent(QWidget *widget, QEvent::Type type, Qt::MouseButton button) {
+void sendSynteticMouseEvent(
+	QWidget *widget,
+	QEvent::Type type,
+	Qt::MouseButton button,
+	const QPoint &globalPoint);
+
+inline void sendSynteticMouseEvent(
+		QWidget *widget,
+		QEvent::Type type,
+		Qt::MouseButton button) {
 	return sendSynteticMouseEvent(widget, type, button, QCursor::pos());
 }

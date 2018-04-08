@@ -1,22 +1,9 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
@@ -26,6 +13,12 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 
 namespace Platform {
 namespace Dlls {
+
+void init();
+
+// KERNEL32.DLL
+typedef BOOL (FAR STDAPICALLTYPE *f_SetDllDirectory)(LPCWSTR lpPathName);
+extern f_SetDllDirectory SetDllDirectory;
 
 void start();
 
@@ -57,6 +50,9 @@ extern f_OpenAs_RunDLL OpenAs_RunDLL;
 typedef HRESULT (FAR STDAPICALLTYPE *f_SHQueryUserNotificationState)(QUERY_USER_NOTIFICATION_STATE *pquns);
 extern f_SHQueryUserNotificationState SHQueryUserNotificationState;
 
+typedef void (FAR STDAPICALLTYPE *f_SHChangeNotify)(LONG wEventId, UINT uFlags, __in_opt LPCVOID dwItem1, __in_opt LPCVOID dwItem2);
+extern f_SHChangeNotify SHChangeNotify;
+
 typedef HRESULT (FAR STDAPICALLTYPE *f_SetCurrentProcessExplicitAppUserModelID)(__in PCWSTR AppID);
 extern f_SetCurrentProcessExplicitAppUserModelID SetCurrentProcessExplicitAppUserModelID;
 
@@ -73,6 +69,9 @@ extern f_WTSUnRegisterSessionNotification WTSUnRegisterSessionNotification;
 typedef HRESULT (FAR STDAPICALLTYPE *f_PropVariantToString)(_In_ REFPROPVARIANT propvar, _Out_writes_(cch) PWSTR psz, _In_ UINT cch);
 extern f_PropVariantToString PropVariantToString;
 
+typedef HRESULT (FAR STDAPICALLTYPE *f_PSStringFromPropertyKey)(_In_ REFPROPERTYKEY pkey, _Out_writes_(cch) LPWSTR psz, _In_ UINT cch);
+extern f_PSStringFromPropertyKey PSStringFromPropertyKey;
+
 // COMBASE.DLL
 
 typedef HRESULT (FAR STDAPICALLTYPE *f_RoGetActivationFactory)(_In_ HSTRING activatableClassId, _In_ REFIID iid, _COM_Outptr_ void ** factory);
@@ -83,6 +82,8 @@ extern f_WindowsCreateStringReference WindowsCreateStringReference;
 
 typedef HRESULT (FAR STDAPICALLTYPE *f_WindowsDeleteString)(_In_opt_ HSTRING string);
 extern f_WindowsDeleteString WindowsDeleteString;
+
+
 
 } // namespace Dlls
 } // namespace Platform

@@ -1,40 +1,41 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#include "stdafx.h"
+#include "facades.h"
 
-#include "profile/profile_section_memento.h"
-#include "core/vector_of_moveable.h"
+#include "info/info_memento.h"
 #include "core/click_handler_types.h"
+#include "media/media_clip_reader.h"
+#include "window/window_controller.h"
+#include "history/history_item_components.h"
 #include "observer_peer.h"
 #include "mainwindow.h"
 #include "mainwidget.h"
-#include "application.h"
-#include "boxes/confirmbox.h"
-#include "layerwidget.h"
-#include "lang.h"
-
-Q_DECLARE_METATYPE(ClickHandlerPtr);
-Q_DECLARE_METATYPE(Qt::MouseButton);
+#include "apiwrap.h"
+#include "messenger.h"
+#include "auth_session.h"
+#include "boxes/confirm_box.h"
+#include "window/layer_widget.h"
+#include "lang/lang_keys.h"
+#include "base/observer.h"
+#include "history/history.h"
+#include "history/history_item.h"
+#include "history/history_media.h"
+#include "styles/style_history.h"
+#include "data/data_session.h"
 
 namespace App {
+namespace internal {
+
+void CallDelayed(int duration, base::lambda_once<void()> &&lambda) {
+	Messenger::Instance().callDelayed(duration, std::move(lambda));
+}
+
+} // namespace internal
 
 void sendBotCommand(PeerData *peer, UserData *bot, const QString &cmd, MsgId replyTo) {
 	if (auto m = main()) {
@@ -42,69 +43,96 @@ void sendBotCommand(PeerData *peer, UserData *bot, const QString &cmd, MsgId rep
 	}
 }
 
-bool insertBotCommand(const QString &cmd, bool specialGif) {
+void hideSingleUseKeyboard(const HistoryItem *msg) {
 	if (auto m = main()) {
-		return m->insertBotCommand(cmd, specialGif);
+		m->hideSingleUseKeyboard(msg->history()->peer, msg->id);
+	}
+}
+
+bool insertBotCommand(const QString &cmd) {
+	if (auto m = main()) {
+		return m->insertBotCommand(cmd);
 	}
 	return false;
 }
 
-void activateBotCommand(const HistoryItem *msg, int row, int col) {
-	const HistoryMessageReplyMarkup::Button *button = nullptr;
+void activateBotCommand(
+		not_null<const HistoryItem*> msg,
+		int row,
+		int column) {
+	const HistoryMessageMarkupButton *button = nullptr;
 	if (auto markup = msg->Get<HistoryMessageReplyMarkup>()) {
 		if (row < markup->rows.size()) {
-			const auto &buttonRow(markup->rows.at(row));
-			if (col < buttonRow.size()) {
-				button = &buttonRow.at(col);
+			auto &buttonRow = markup->rows[row];
+			if (column < buttonRow.size()) {
+				button = &buttonRow[column];
 			}
 		}
 	}
 	if (!button) return;
 
+	using ButtonType = HistoryMessageMarkupButton::Type;
 	switch (button->type) {
-	case HistoryMessageReplyMarkup::Button::Default: {
+	case ButtonType::Default: {
 		// Copy string before passing it to the sending method
 		// because the original button can be destroyed inside.
 		MsgId replyTo = (msg->id > 0) ? msg->id : 0;
 		sendBotCommand(msg->history()->peer, msg->fromOriginal()->asUser(), QString(button->text), replyTo);
 	} break;
 
-	case HistoryMessageReplyMarkup::Button::Callback: {
-		if (MainWidget *m = main()) {
-			m->app_sendBotCallback(button, msg, row, col);
+	case ButtonType::Callback:
+	case ButtonType::Game: {
+		if (auto m = main()) {
+			m->app_sendBotCallback(button, msg, row, column);
 		}
 	} break;
 
-	case HistoryMessageReplyMarkup::Button::Url: {
+	case ButtonType::Buy: {
+		Ui::show(Box<InformBox>(lang(lng_payments_not_supported)));
+	} break;
+
+	case ButtonType::Url: {
 		auto url = QString::fromUtf8(button->data);
-		HiddenUrlClickHandler(url).onClick(Qt::LeftButton);
+		auto skipConfirmation = false;
+		if (auto bot = msg->getMessageBot()) {
+			if (bot->isVerified()) {
+				skipConfirmation = true;
+			}
+		}
+		if (skipConfirmation) {
+			UrlClickHandler::doOpen(url);
+		} else {
+			HiddenUrlClickHandler::doOpen(url);
+		}
 	} break;
 
-	case HistoryMessageReplyMarkup::Button::RequestLocation: {
-		Ui::showLayer(new InformBox(lang(lng_bot_share_location_unavailable)));
+	case ButtonType::RequestLocation: {
+		hideSingleUseKeyboard(msg);
+		Ui::show(Box<InformBox>(lang(lng_bot_share_location_unavailable)));
 	} break;
 
-	case HistoryMessageReplyMarkup::Button::RequestPhone: {
-		SharePhoneConfirmBox *box = new SharePhoneConfirmBox(msg->history()->peer);
-		box->connect(box, SIGNAL(confirmed(PeerData*)), App::main(), SLOT(onSharePhoneWithBot(PeerData*)));
-		Ui::showLayer(box);
+	case ButtonType::RequestPhone: {
+		hideSingleUseKeyboard(msg);
+		const auto msgId = msg->id;
+		const auto history = msg->history();
+		Ui::show(Box<ConfirmBox>(lang(lng_bot_share_phone), lang(lng_bot_share_phone_confirm), [=] {
+			Ui::showPeerHistory(history, ShowAtTheEndMsgId);
+			auto options = ApiWrap::SendOptions(history);
+			options.replyTo = msgId;
+			Auth().api().shareContact(App::self(), options);
+		}));
 	} break;
 
-	case HistoryMessageReplyMarkup::Button::SwitchInline: {
+	case ButtonType::SwitchInlineSame:
+	case ButtonType::SwitchInline: {
 		if (auto m = App::main()) {
-			auto getMessageBot = [msg]() -> UserData* {
-				if (auto bot = msg->viaBot()) {
-					return bot;
-				} else if (auto bot = msg->from()->asUser()) {
-					return bot;
-				} else if (auto bot = msg->history()->peer->asUser()) {
-					return bot;
-				}
-				return nullptr;
-			};
-			if (auto bot = getMessageBot()) {
-				auto tryFastSwitch = [bot, &button]() -> bool {
-					if (bot->botInfo && bot->botInfo->inlineReturnPeerId) {
+			if (auto bot = msg->getMessageBot()) {
+				auto tryFastSwitch = [bot, &button, msgId = msg->id]() -> bool {
+					auto samePeer = (button->type == ButtonType::SwitchInlineSame);
+					if (samePeer) {
+						Notify::switchInlineBotButtonReceived(QString::fromUtf8(button->data), bot, msgId);
+						return true;
+					} else if (bot->botInfo && bot->botInfo->inlineReturnPeerId) {
 						if (Notify::switchInlineBotButtonReceived(QString::fromUtf8(button->data))) {
 							return true;
 						}
@@ -121,7 +149,18 @@ void activateBotCommand(const HistoryItem *msg, int row, int col) {
 }
 
 void searchByHashtag(const QString &tag, PeerData *inPeer) {
-	if (MainWidget *m = main()) m->searchMessages(tag + ' ', (inPeer && inPeer->isChannel() && !inPeer->isMegagroup()) ? inPeer : 0);
+	if (const auto m = main()) {
+		Ui::hideSettingsAndLayer();
+		Messenger::Instance().hideMediaView();
+		if (inPeer && (!inPeer->isChannel() || inPeer->isMegagroup())) {
+			inPeer = nullptr;
+		}
+		m->searchMessages(
+			tag + ' ',
+			(inPeer
+				? App::history(inPeer).get()
+				: Dialogs::Key()));
+	}
 }
 
 void openPeerByName(const QString &username, MsgId msgId, const QString &startToken) {
@@ -132,25 +171,6 @@ void joinGroupByHash(const QString &hash) {
 	if (MainWidget *m = main()) m->joinGroupByHash(hash);
 }
 
-void stickersBox(const QString &name) {
-	if (MainWidget *m = main()) m->stickersBox(MTP_inputStickerSetShortName(MTP_string(name)));
-}
-
-void openLocalUrl(const QString &url) {
-	if (MainWidget *m = main()) m->openLocalUrl(url);
-}
-
-bool forward(const PeerId &peer, ForwardWhatMessages what) {
-	if (MainWidget *m = main()) return m->onForward(peer, what);
-	return false;
-}
-
-void removeDialog(History *history) {
-	if (MainWidget *m = main()) {
-		m->removeDialog(history);
-	}
-}
-
 void showSettings() {
 	if (auto w = wnd()) {
 		w->showSettings();
@@ -158,22 +178,32 @@ void showSettings() {
 }
 
 void activateClickHandler(ClickHandlerPtr handler, Qt::MouseButton button) {
-	if (auto w = wnd()) {
-		qRegisterMetaType<ClickHandlerPtr>();
-		qRegisterMetaType<Qt::MouseButton>();
-		QMetaObject::invokeMethod(w, "app_activateClickHandler", Qt::QueuedConnection, Q_ARG(ClickHandlerPtr, handler), Q_ARG(Qt::MouseButton, button));
-	}
+	crl::on_main(wnd(), [handler, button] {
+		handler->onClick(button);
+	});
 }
 
 void logOutDelayed() {
-	if (auto w = App::wnd()) {
-		QMetaObject::invokeMethod(w, "onLogoutSure", Qt::QueuedConnection);
-	}
+	InvokeQueued(QCoreApplication::instance(), [] {
+		App::logOut();
+	});
 }
 
 } // namespace App
 
 namespace Ui {
+namespace internal {
+
+void showBox(
+		object_ptr<BoxContent> content,
+		LayerOptions options,
+		anim::type animated) {
+	if (auto w = App::wnd()) {
+		w->ui_showBox(std::move(content), options, animated);
+	}
+}
+
+} // namespace internal
 
 void showMediaPreview(DocumentData *document) {
 	if (auto w = App::wnd()) {
@@ -193,16 +223,19 @@ void hideMediaPreview() {
 	}
 }
 
-void showLayer(LayeredWidget *box, ShowLayerOptions options) {
+void hideLayer(anim::type animated) {
 	if (auto w = App::wnd()) {
-		w->ui_showLayer(box, options);
-	} else {
-		delete box;
+		w->ui_showBox(
+			{ nullptr },
+			LayerOption::CloseOther,
+			animated);
 	}
 }
 
-void hideLayer(bool fast) {
-	if (auto w = App::wnd()) w->ui_showLayer(0, ShowLayerOptions(CloseOtherLayers) | (fast ? ForceFastShowLayer : AnimatedShowLayer));
+void hideSettingsAndLayer(anim::type animated) {
+	if (auto w = App::wnd()) {
+		w->ui_hideSettingsAndLayer(animated);
+	}
 }
 
 bool isLayerShown() {
@@ -210,80 +243,40 @@ bool isLayerShown() {
 	return false;
 }
 
-bool isMediaViewShown() {
-	if (auto w = App::wnd()) return w->ui_isMediaViewShown();
-	return false;
-}
-
-bool isInlineItemBeingChosen() {
-	if (MainWidget *m = App::main()) return m->ui_isInlineItemBeingChosen();
-	return false;
-}
-
-void repaintHistoryItem(const HistoryItem *item) {
-	if (!item) return;
-	if (MainWidget *m = App::main()) m->ui_repaintHistoryItem(item);
-}
-
-void repaintInlineItem(const InlineBots::Layout::ItemBase *layout) {
-	if (!layout) return;
-	if (MainWidget *m = App::main()) m->ui_repaintInlineItem(layout);
-}
-
-bool isInlineItemVisible(const InlineBots::Layout::ItemBase *layout) {
-	if (MainWidget *m = App::main()) return m->ui_isInlineItemVisible(layout);
-	return false;
-}
-
-void autoplayMediaInlineAsync(const FullMsgId &msgId) {
-	if (MainWidget *m = App::main()) {
-		QMetaObject::invokeMethod(m, "ui_autoplayMediaInlineAsync", Qt::QueuedConnection, Q_ARG(qint32, msgId.channel), Q_ARG(qint32, msgId.msg));
-	}
-}
-
 void showPeerProfile(const PeerId &peer) {
+	if (auto window = App::wnd()) {
+		if (auto controller = window->controller()) {
+			controller->showPeerInfo(peer);
+		}
+	}
+}
+
+void showPeerProfile(not_null<const History*> history) {
+	showPeerProfile(history->peer->id);
+}
+
+void showPeerHistory(
+		const PeerId &peer,
+		MsgId msgId) {
+	auto ms = getms();
 	if (auto m = App::main()) {
-		m->showWideSection(Profile::SectionMemento(App::peer(peer)));
+		m->ui_showPeerHistory(
+			peer,
+			Window::SectionShow::Way::ClearStack,
+			msgId);
 	}
 }
 
-void showPeerOverview(const PeerId &peer, MediaOverviewType type) {
-	if (auto m = App::main()) {
-		m->showMediaOverview(App::peer(peer), type);
-	}
+void showPeerHistoryAtItem(not_null<const HistoryItem*> item) {
+	showPeerHistory(item->history()->peer->id, item->id);
 }
 
-void showPeerHistory(const PeerId &peer, MsgId msgId, bool back) {
-	if (MainWidget *m = App::main()) m->ui_showPeerHistory(peer, msgId, back);
-}
-
-void showPeerHistoryAsync(const PeerId &peer, MsgId msgId) {
-	if (MainWidget *m = App::main()) {
-		QMetaObject::invokeMethod(m, "ui_showPeerHistoryAsync", Qt::QueuedConnection, Q_ARG(quint64, peer), Q_ARG(qint32, msgId));
-	}
+void showPeerHistory(not_null<const History*> history, MsgId msgId) {
+	showPeerHistory(history->peer->id, msgId);
 }
 
 PeerData *getPeerForMouseAction() {
-	if (auto w = App::wnd()) {
-		return w->ui_getPeerForMouseAction();
-	}
-	return nullptr;
-}
-
-bool hideWindowNoQuit() {
-	if (!App::quitting()) {
-		if (auto w = App::wnd()) {
-			if (cWorkMode() == dbiwmTrayOnly || cWorkMode() == dbiwmWindowAndTray) {
-				return w->minimizeToTray();
-			} else if (cPlatform() == dbipMac || cPlatform() == dbipMacOld) {
-				w->closeWithoutDestroy();
-				w->updateIsActive(Global::OfflineBlurTimeout());
-				w->updateGlobalMenu();
-				return true;
-			}
-		}
-	}
-	return false;
+	return Messenger::Instance().ui_getPeerForMouseAction();
 }
 
 bool skipPaintEvent(QWidget *widget, QPaintEvent *event) {
@@ -301,10 +294,6 @@ namespace Notify {
 
 void userIsBotChanged(UserData *user) {
 	if (MainWidget *m = App::main()) m->notify_userIsBotChanged(user);
-}
-
-void userIsContactChanged(UserData *user, bool fromThisApp) {
-	if (MainWidget *m = App::main()) m->notify_userIsContactChanged(user, fromThisApp);
 }
 
 void botCommandsChanged(UserData *user) {
@@ -330,9 +319,9 @@ void inlineKeyboardMoved(const HistoryItem *item, int oldKeyboardTop, int newKey
 	}
 }
 
-bool switchInlineBotButtonReceived(const QString &query) {
-	if (MainWidget *m = App::main()) {
-		return m->notify_switchInlineBotButtonReceived(query);
+bool switchInlineBotButtonReceived(const QString &query, UserData *samePeerBot, MsgId samePeerReplyTo) {
+	if (auto main = App::main()) {
+		return main->notify_switchInlineBotButtonReceived(query, samePeerBot, samePeerReplyTo);
 	}
 	return false;
 }
@@ -341,30 +330,8 @@ void migrateUpdated(PeerData *peer) {
 	if (MainWidget *m = App::main()) m->notify_migrateUpdated(peer);
 }
 
-void clipStopperHidden(ClipStopperType type) {
-	if (MainWidget *m = App::main()) m->notify_clipStopperHidden(type);
-}
-
-void historyItemLayoutChanged(const HistoryItem *item) {
-	if (MainWidget *m = App::main()) m->notify_historyItemLayoutChanged(item);
-}
-
-void inlineItemLayoutChanged(const InlineBots::Layout::ItemBase *layout) {
-	if (MainWidget *m = App::main()) m->notify_inlineItemLayoutChanged(layout);
-}
-
 void historyMuteUpdated(History *history) {
 	if (MainWidget *m = App::main()) m->notify_historyMuteUpdated(history);
-}
-
-void handlePendingHistoryUpdate() {
-	if (MainWidget *m = App::main()) {
-		m->notify_handlePendingHistoryUpdate();
-	}
-	for_const (HistoryItem *item, Global::PendingRepaintItems()) {
-		Ui::repaintHistoryItem(item);
-	}
-	Global::RefPendingRepaintItems().clear();
 }
 
 void unreadCounterUpdated() {
@@ -374,17 +341,17 @@ void unreadCounterUpdated() {
 } // namespace Notify
 
 #define DefineReadOnlyVar(Namespace, Type, Name) const Type &Name() { \
-	t_assert_full(Namespace##Data != 0, #Namespace "Data != nullptr in " #Namespace "::" #Name, __FILE__, __LINE__); \
+	AssertCustom(Namespace##Data != nullptr, #Namespace "Data != nullptr in " #Namespace "::" #Name); \
 	return Namespace##Data->Name; \
 }
 #define DefineRefVar(Namespace, Type, Name) DefineReadOnlyVar(Namespace, Type, Name) \
 Type &Ref##Name() { \
-	t_assert_full(Namespace##Data != 0, #Namespace "Data != nullptr in " #Namespace "::Ref" #Name, __FILE__, __LINE__); \
+	AssertCustom(Namespace##Data != nullptr, #Namespace "Data != nullptr in " #Namespace "::Ref" #Name); \
 	return Namespace##Data->Name; \
 }
 #define DefineVar(Namespace, Type, Name) DefineRefVar(Namespace, Type, Name) \
 void Set##Name(const Type &Name) { \
-	t_assert_full(Namespace##Data != 0, #Namespace "Data != nullptr in " #Namespace "::Set" #Name, __FILE__, __LINE__); \
+	AssertCustom(Namespace##Data != nullptr, #Namespace "Data != nullptr in " #Namespace "::Set" #Name); \
 	Namespace##Data->Name = Name; \
 }
 
@@ -392,17 +359,14 @@ namespace Sandbox {
 namespace internal {
 
 struct Data {
-	QString LangSystemISO;
-	int32 LangSystem = languageDefault;
-
 	QByteArray LastCrashDump;
-	ConnectionProxy PreLaunchProxy;
+	ProxyData PreLaunchProxy;
 };
 
 } // namespace internal
 } // namespace Sandbox
 
-Sandbox::internal::Data *SandboxData = nullptr;
+std::unique_ptr<Sandbox::internal::Data> SandboxData;
 uint64 SandboxUserTag = 0;
 
 namespace Sandbox {
@@ -489,32 +453,23 @@ void WorkingDirReady() {
 }
 
 void start() {
-	SandboxData = new internal::Data();
+	SandboxData = std::make_unique<internal::Data>();
+}
 
-	SandboxData->LangSystemISO = psCurrentLanguage();
-	if (SandboxData->LangSystemISO.isEmpty()) SandboxData->LangSystemISO = qstr("en");
-	QByteArray l = LangSystemISO().toLatin1();
-	for (int32 i = 0; i < languageCount; ++i) {
-		if (l.at(0) == LanguageCodes[i][0] && l.at(1) == LanguageCodes[i][1]) {
-			SandboxData->LangSystem = i;
-			break;
-		}
-	}
+bool started() {
+	return (SandboxData != nullptr);
 }
 
 void finish() {
-	delete SandboxData;
-	SandboxData = 0;
+	SandboxData.reset();
 }
 
 uint64 UserTag() {
 	return SandboxUserTag;
 }
 
-DefineReadOnlyVar(Sandbox, QString, LangSystemISO);
-DefineReadOnlyVar(Sandbox, int32, LangSystem);
 DefineVar(Sandbox, QByteArray, LastCrashDump);
-DefineVar(Sandbox, ConnectionProxy, PreLaunchProxy);
+DefineVar(Sandbox, ProxyData, PreLaunchProxy);
 
 } // namespace Sandbox
 
@@ -522,23 +477,32 @@ namespace Global {
 namespace internal {
 
 struct Data {
-	uint64 LaunchId = 0;
-	SingleDelayedCall HandleHistoryUpdate = { App::app(), "call_handleHistoryUpdate" };
-	SingleDelayedCall HandleUnreadCounterUpdate = { App::app(), "call_handleUnreadCounterUpdate" };
-	SingleDelayedCall HandleFileDialogQueue = { App::app(), "call_handleFileDialogQueue" };
-	SingleDelayedCall HandleDelayedPeerUpdates = { App::app(), "call_handleDelayedPeerUpdates" };
+	SingleQueuedInvokation HandleUnreadCounterUpdate = { [] { Messenger::Instance().call_handleUnreadCounterUpdate(); } };
+	SingleQueuedInvokation HandleDelayedPeerUpdates = { [] { Messenger::Instance().call_handleDelayedPeerUpdates(); } };
+	SingleQueuedInvokation HandleObservables = { [] { Messenger::Instance().call_handleObservables(); } };
 
-	Adaptive::Layout AdaptiveLayout = Adaptive::NormalLayout;
+	Adaptive::WindowLayout AdaptiveWindowLayout = Adaptive::WindowLayout::Normal;
+	Adaptive::ChatLayout AdaptiveChatLayout = Adaptive::ChatLayout::Normal;
 	bool AdaptiveForWide = true;
+	base::Observable<void> AdaptiveChanged;
+
 	bool DialogsModeEnabled = false;
 	Dialogs::Mode DialogsMode = Dialogs::Mode::All;
 	bool ModerateModeEnabled = false;
 
+	bool ScreenIsLocked = false;
+
 	int32 DebugLoggingFlags = 0;
+
+	float64 RememberedSongVolume = kDefaultVolume;
+	float64 SongVolume = kDefaultVolume;
+	base::Observable<void> SongVolumeChanged;
+	float64 VideoVolume = kDefaultVolume;
+	base::Observable<void> VideoVolumeChanged;
 
 	// config
 	int32 ChatSizeMax = 200;
-	int32 MegagroupSizeMax = 1000;
+	int32 MegagroupSizeMax = 10000;
 	int32 ForwardedCountMax = 100;
 	int32 OnlineUpdatePeriod = 120000;
 	int32 OfflineBlurTimeout = 5000;
@@ -547,23 +511,73 @@ struct Data {
 	int32 OnlineCloudTimeout = 300000;
 	int32 NotifyCloudDelay = 30000;
 	int32 NotifyDefaultDelay = 1500;
-	int32 ChatBigSize = 10;
 	int32 PushChatPeriod = 60000;
 	int32 PushChatLimit = 2;
 	int32 SavedGifsLimit = 200;
 	int32 EditTimeLimit = 172800;
+	int32 RevokeTimeLimit = 172800;
+	int32 RevokePrivateTimeLimit = 172800;
+	bool RevokePrivateInbox = false;
+	int32 StickersRecentLimit = 30;
+	int32 StickersFavedLimit = 5;
+	int32 PinnedDialogsCountMax = 5;
+	QString InternalLinksDomain = qsl("https://t.me/");
+	int32 ChannelsReadMediaPeriod = 86400 * 7;
+	int32 CallReceiveTimeoutMs = 20000;
+	int32 CallRingTimeoutMs = 90000;
+	int32 CallConnectTimeoutMs = 30000;
+	int32 CallPacketTimeoutMs = 10000;
+	bool PhoneCallsEnabled = true;
+	base::Observable<void> PhoneCallsEnabledChanged;
 
 	HiddenPinnedMessagesMap HiddenPinnedMessages;
 
-	PendingItemsMap PendingRepaintItems;
-
 	Stickers::Sets StickerSets;
 	Stickers::Order StickerSetsOrder;
-	uint64 LastStickersUpdate = 0;
-
-	MTP::DcOptions DcOptions;
+	TimeMs LastStickersUpdate = 0;
+	TimeMs LastRecentStickersUpdate = 0;
+	TimeMs LastFavedStickersUpdate = 0;
+	Stickers::Order FeaturedStickerSetsOrder;
+	int FeaturedStickerSetsUnreadCount = 0;
+	base::Observable<void> FeaturedStickerSetsUnreadCountChanged;
+	TimeMs LastFeaturedStickersUpdate = 0;
+	Stickers::Order ArchivedStickerSetsOrder;
 
 	CircleMasksMap CircleMasks;
+
+	base::Observable<void> SelfChanged;
+
+	bool AskDownloadPath = false;
+	QString DownloadPath;
+	QByteArray DownloadPathBookmark;
+	base::Observable<void> DownloadPathChanged;
+
+	bool SuggestStickersByEmoji = true;
+	bool SoundNotify = true;
+	bool DesktopNotify = true;
+	bool RestoreSoundNotifyFromTray = false;
+	bool IncludeMuted = true;
+	DBINotifyView NotifyView = dbinvShowPreview;
+	bool NativeNotifications = false;
+	int NotificationsCount = 3;
+	Notify::ScreenCorner NotificationsCorner = Notify::ScreenCorner::BottomRight;
+	bool NotificationsDemoIsShown = false;
+
+	DBIConnectionType ConnectionType = dbictAuto;
+	DBIConnectionType LastProxyType = dbictAuto;
+	bool TryIPv6 = (cPlatform() == dbipWindows) ? false : true;
+	ProxyData ConnectionProxy;
+	base::Observable<void> ConnectionTypeChanged;
+
+	int AutoLock = 3600;
+	bool LocalPasscode = false;
+	base::Observable<void> LocalPasscodeChanged;
+
+	base::Variable<DBIWorkMode> WorkMode = { dbiwmWindowAndTray };
+
+	base::Observable<void> UnreadCounterUpdate;
+	base::Observable<void> PeerChooseCancel;
+
 };
 
 } // namespace internal
@@ -579,8 +593,6 @@ bool started() {
 
 void start() {
 	GlobalData = new internal::Data();
-
-	memset_rand(&GlobalData->LaunchId, sizeof(GlobalData->LaunchId));
 }
 
 void finish() {
@@ -588,19 +600,28 @@ void finish() {
 	GlobalData = nullptr;
 }
 
-DefineReadOnlyVar(Global, uint64, LaunchId);
-DefineRefVar(Global, SingleDelayedCall, HandleHistoryUpdate);
-DefineRefVar(Global, SingleDelayedCall, HandleUnreadCounterUpdate);
-DefineRefVar(Global, SingleDelayedCall, HandleFileDialogQueue);
-DefineRefVar(Global, SingleDelayedCall, HandleDelayedPeerUpdates);
+DefineRefVar(Global, SingleQueuedInvokation, HandleUnreadCounterUpdate);
+DefineRefVar(Global, SingleQueuedInvokation, HandleDelayedPeerUpdates);
+DefineRefVar(Global, SingleQueuedInvokation, HandleObservables);
 
-DefineVar(Global, Adaptive::Layout, AdaptiveLayout);
+DefineVar(Global, Adaptive::WindowLayout, AdaptiveWindowLayout);
+DefineVar(Global, Adaptive::ChatLayout, AdaptiveChatLayout);
 DefineVar(Global, bool, AdaptiveForWide);
+DefineRefVar(Global, base::Observable<void>, AdaptiveChanged);
+
 DefineVar(Global, bool, DialogsModeEnabled);
 DefineVar(Global, Dialogs::Mode, DialogsMode);
 DefineVar(Global, bool, ModerateModeEnabled);
 
+DefineVar(Global, bool, ScreenIsLocked);
+
 DefineVar(Global, int32, DebugLoggingFlags);
+
+DefineVar(Global, float64, RememberedSongVolume);
+DefineVar(Global, float64, SongVolume);
+DefineRefVar(Global, base::Observable<void>, SongVolumeChanged);
+DefineVar(Global, float64, VideoVolume);
+DefineRefVar(Global, base::Observable<void>, VideoVolumeChanged);
 
 // config
 DefineVar(Global, int32, ChatSizeMax);
@@ -613,22 +634,71 @@ DefineVar(Global, int32, OnlineFocusTimeout);
 DefineVar(Global, int32, OnlineCloudTimeout);
 DefineVar(Global, int32, NotifyCloudDelay);
 DefineVar(Global, int32, NotifyDefaultDelay);
-DefineVar(Global, int32, ChatBigSize);
 DefineVar(Global, int32, PushChatPeriod);
 DefineVar(Global, int32, PushChatLimit);
 DefineVar(Global, int32, SavedGifsLimit);
 DefineVar(Global, int32, EditTimeLimit);
+DefineVar(Global, int32, RevokeTimeLimit);
+DefineVar(Global, int32, RevokePrivateTimeLimit);
+DefineVar(Global, bool, RevokePrivateInbox);
+DefineVar(Global, int32, StickersRecentLimit);
+DefineVar(Global, int32, StickersFavedLimit);
+DefineVar(Global, int32, PinnedDialogsCountMax);
+DefineVar(Global, QString, InternalLinksDomain);
+DefineVar(Global, int32, ChannelsReadMediaPeriod);
+DefineVar(Global, int32, CallReceiveTimeoutMs);
+DefineVar(Global, int32, CallRingTimeoutMs);
+DefineVar(Global, int32, CallConnectTimeoutMs);
+DefineVar(Global, int32, CallPacketTimeoutMs);
+DefineVar(Global, bool, PhoneCallsEnabled);
+DefineRefVar(Global, base::Observable<void>, PhoneCallsEnabledChanged);
 
 DefineVar(Global, HiddenPinnedMessagesMap, HiddenPinnedMessages);
 
-DefineRefVar(Global, PendingItemsMap, PendingRepaintItems);
-
 DefineVar(Global, Stickers::Sets, StickerSets);
 DefineVar(Global, Stickers::Order, StickerSetsOrder);
-DefineVar(Global, uint64, LastStickersUpdate);
-
-DefineVar(Global, MTP::DcOptions, DcOptions);
+DefineVar(Global, TimeMs, LastStickersUpdate);
+DefineVar(Global, TimeMs, LastRecentStickersUpdate);
+DefineVar(Global, TimeMs, LastFavedStickersUpdate);
+DefineVar(Global, Stickers::Order, FeaturedStickerSetsOrder);
+DefineVar(Global, int, FeaturedStickerSetsUnreadCount);
+DefineRefVar(Global, base::Observable<void>, FeaturedStickerSetsUnreadCountChanged);
+DefineVar(Global, TimeMs, LastFeaturedStickersUpdate);
+DefineVar(Global, Stickers::Order, ArchivedStickerSetsOrder);
 
 DefineRefVar(Global, CircleMasksMap, CircleMasks);
+
+DefineRefVar(Global, base::Observable<void>, SelfChanged);
+
+DefineVar(Global, bool, AskDownloadPath);
+DefineVar(Global, QString, DownloadPath);
+DefineVar(Global, QByteArray, DownloadPathBookmark);
+DefineRefVar(Global, base::Observable<void>, DownloadPathChanged);
+
+DefineVar(Global, bool, SuggestStickersByEmoji);
+DefineVar(Global, bool, SoundNotify);
+DefineVar(Global, bool, DesktopNotify);
+DefineVar(Global, bool, RestoreSoundNotifyFromTray);
+DefineVar(Global, bool, IncludeMuted);
+DefineVar(Global, DBINotifyView, NotifyView);
+DefineVar(Global, bool, NativeNotifications);
+DefineVar(Global, int, NotificationsCount);
+DefineVar(Global, Notify::ScreenCorner, NotificationsCorner);
+DefineVar(Global, bool, NotificationsDemoIsShown);
+
+DefineVar(Global, DBIConnectionType, ConnectionType);
+DefineVar(Global, DBIConnectionType, LastProxyType);
+DefineVar(Global, bool, TryIPv6);
+DefineVar(Global, ProxyData, ConnectionProxy);
+DefineRefVar(Global, base::Observable<void>, ConnectionTypeChanged);
+
+DefineVar(Global, int, AutoLock);
+DefineVar(Global, bool, LocalPasscode);
+DefineRefVar(Global, base::Observable<void>, LocalPasscodeChanged);
+
+DefineRefVar(Global, base::Variable<DBIWorkMode>, WorkMode);
+
+DefineRefVar(Global, base::Observable<void>, UnreadCounterUpdate);
+DefineRefVar(Global, base::Observable<void>, PeerChooseCancel);
 
 } // namespace Global

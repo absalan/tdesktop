@@ -1,27 +1,14 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
 class ClickHandler;
-using ClickHandlerPtr = QSharedPointer<ClickHandler>;
+using ClickHandlerPtr = std::shared_ptr<ClickHandler>;
 
 enum ExpandLinksMode {
 	ExpandLinksNone,
@@ -32,7 +19,6 @@ enum ExpandLinksMode {
 
 class ClickHandlerHost {
 protected:
-
 	virtual void clickHandlerActiveChanged(const ClickHandlerPtr &action, bool active) {
 	}
 	virtual void clickHandlerPressedChanged(const ClickHandlerPtr &action, bool pressed) {
@@ -62,7 +48,8 @@ public:
 	}
 
 	// Copy to clipboard support.
-	virtual void copyToClipboard() const {
+	virtual QString copyToClipboardText() const {
+		return QString();
 	}
 	virtual QString copyToClipboardContextItemText() const {
 		return QString();
@@ -93,7 +80,7 @@ public:
 		if (!_active || !*_active) {
 			return;
 		}
-		_pressed.makeIfNull();
+		_pressed.createIfNull();
 		*_pressed = *_active;
 		if ((_pressedHost = _activeHost)) {
 			_pressedHost->clickHandlerPressedChanged(*_pressed, true);
@@ -104,9 +91,8 @@ public:
 	// The activated click handler (if any) is returned.
 	static ClickHandlerPtr unpressed() {
 		if (_pressed && *_pressed) {
-			bool activated = (_active && *_active == *_pressed);
-			ClickHandlerPtr waspressed = *_pressed;
-			(*_pressed).clear();
+			const auto activated = (_active && *_active == *_pressed);
+			const auto waspressed = base::take(*_pressed);
 			if (_pressedHost) {
 				_pressedHost->clickHandlerPressedChanged(waspressed, false);
 				_pressedHost = nullptr;
@@ -145,11 +131,15 @@ public:
 	}
 	static void hostDestroyed(ClickHandlerHost *host) {
 		if (_activeHost == host) {
-			if (_active) (*_active).clear();
+			if (_active) {
+				*_active = nullptr;
+			}
 			_activeHost = nullptr;
 		}
 		if (_pressedHost == host) {
-			if (_pressed) (*_pressed).clear();
+			if (_pressed) {
+				*_pressed = nullptr;
+			}
 			_pressedHost = nullptr;
 		}
 	}
@@ -176,5 +166,20 @@ public:
 
 protected:
 	virtual void onClickImpl() const = 0;
+
+};
+
+class LambdaClickHandler : public ClickHandler {
+public:
+	LambdaClickHandler(base::lambda<void()> handler) : _handler(std::move(handler)) {
+	}
+	void onClick(Qt::MouseButton button) const override final {
+		if (button == Qt::LeftButton && _handler) {
+			_handler();
+		}
+	}
+
+private:
+	base::lambda<void()> _handler;
 
 };

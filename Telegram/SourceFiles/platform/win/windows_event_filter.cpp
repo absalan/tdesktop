@@ -1,27 +1,14 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#include "stdafx.h"
 #include "platform/win/windows_event_filter.h"
 
 #include "mainwindow.h"
+#include "auth_session.h"
 
 namespace Platform {
 namespace {
@@ -74,7 +61,9 @@ bool EventFilter::mainWindowEvent(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 	switch (msg) {
 
 	case WM_TIMECHANGE: {
-		App::wnd()->checkAutoLockIn(100);
+		if (AuthSession::Exists()) {
+			Auth().checkAutoLockIn(100);
+		}
 	} return false;
 
 	case WM_WTSSESSION_CHANGE: {
@@ -91,7 +80,7 @@ bool EventFilter::mainWindowEvent(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 
 	case WM_ACTIVATE: {
 		if (LOWORD(wParam) == WA_CLICKACTIVE) {
-			App::wnd()->inactivePress(true);
+			App::wnd()->setInactivePress(true);
 		}
 		if (LOWORD(wParam) != WA_INACTIVE) {
 			App::wnd()->shadowsActivate();
@@ -103,7 +92,10 @@ bool EventFilter::mainWindowEvent(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 		}
 	} return false;
 
-	case WM_NCPAINT: if (QSysInfo::WindowsVersion >= QSysInfo::WV_WINDOWS8) return false; *result = 0; return true;
+	case WM_NCPAINT: {
+		if (QSysInfo::WindowsVersion >= QSysInfo::WV_WINDOWS8) return false;
+		if (result) *result = 0;
+	} return true;
 
 	case WM_NCCALCSIZE: {
 		WINDOWPLACEMENT wp;
@@ -120,12 +112,13 @@ bool EventFilter::mainWindowEvent(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 				}
 			}
 		}
-		*result = 0;
+		if (result) *result = 0;
 		return true;
 	}
 
 	case WM_NCACTIVATE: {
-		*result = DefWindowProc(hWnd, msg, wParam, -1);
+		auto res = DefWindowProc(hWnd, msg, wParam, -1);
+		if (result) *result = res;
 	} return true;
 
 	case WM_WINDOWPOSCHANGING:
@@ -151,7 +144,7 @@ bool EventFilter::mainWindowEvent(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 					}
 					emit App::wnd()->windowHandle()->windowStateChanged(state);
 				} else {
-					App::wnd()->psUpdatedPosition();
+					App::wnd()->positionUpdated();
 				}
 				App::wnd()->psUpdateMargins();
 				MainWindow::ShadowsChanges changes = (wParam == SIZE_MINIMIZED || wParam == SIZE_MAXIMIZED) ? ShadowsChange::Hidden : (ShadowsChange::Resized | ShadowsChange::Shown);
@@ -168,29 +161,30 @@ bool EventFilter::mainWindowEvent(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 
 	case WM_MOVE: {
 		App::wnd()->shadowsUpdate(ShadowsChange::Moved);
-		App::wnd()->psUpdatedPosition();
+		App::wnd()->positionUpdated();
 	} return false;
 
 	case WM_NCHITTEST: {
+		if (!result) return false;
+
 		POINTS p = MAKEPOINTS(lParam);
 		RECT r;
 		GetWindowRect(hWnd, &r);
-		HitTestType res = App::wnd()->hitTest(QPoint(p.x - r.left + App::wnd()->deltaLeft(), p.y - r.top + App::wnd()->deltaTop()));
+		auto res = App::wnd()->hitTest(QPoint(p.x - r.left + App::wnd()->deltaLeft(), p.y - r.top + App::wnd()->deltaTop()));
 		switch (res) {
-		case HitTestClient:
-		case HitTestSysButton:   *result = HTCLIENT; break;
-		case HitTestIcon:        *result = HTCAPTION; break;
-		case HitTestCaption:     *result = HTCAPTION; break;
-		case HitTestTop:         *result = HTTOP; break;
-		case HitTestTopRight:    *result = HTTOPRIGHT; break;
-		case HitTestRight:       *result = HTRIGHT; break;
-		case HitTestBottomRight: *result = HTBOTTOMRIGHT; break;
-		case HitTestBottom:      *result = HTBOTTOM; break;
-		case HitTestBottomLeft:  *result = HTBOTTOMLEFT; break;
-		case HitTestLeft:        *result = HTLEFT; break;
-		case HitTestTopLeft:     *result = HTTOPLEFT; break;
-		case HitTestNone:
-		default:                 *result = HTTRANSPARENT; break;
+		case Window::HitTestResult::Client:
+		case Window::HitTestResult::SysButton:   *result = HTCLIENT; break;
+		case Window::HitTestResult::Caption:     *result = HTCAPTION; break;
+		case Window::HitTestResult::Top:         *result = HTTOP; break;
+		case Window::HitTestResult::TopRight:    *result = HTTOPRIGHT; break;
+		case Window::HitTestResult::Right:       *result = HTRIGHT; break;
+		case Window::HitTestResult::BottomRight: *result = HTBOTTOMRIGHT; break;
+		case Window::HitTestResult::Bottom:      *result = HTBOTTOM; break;
+		case Window::HitTestResult::BottomLeft:  *result = HTBOTTOMLEFT; break;
+		case Window::HitTestResult::Left:        *result = HTLEFT; break;
+		case Window::HitTestResult::TopLeft:     *result = HTTOPLEFT; break;
+		case Window::HitTestResult::None:
+		default:                                 *result = HTTRANSPARENT; break;
 		};
 	} return true;
 
@@ -198,46 +192,10 @@ bool EventFilter::mainWindowEvent(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 		SendMessage(hWnd, WM_SYSCOMMAND, SC_MOUSEMENU, lParam);
 	} return true;
 
-	case WM_NCLBUTTONDOWN: {
-		POINTS p = MAKEPOINTS(lParam);
-		RECT r;
-		GetWindowRect(hWnd, &r);
-		HitTestType res = App::wnd()->hitTest(QPoint(p.x - r.left + App::wnd()->deltaLeft(), p.y - r.top + App::wnd()->deltaTop()));
-		switch (res) {
-		case HitTestIcon:
-		if (menuHidden && getms() < menuHidden + 10) {
-			menuHidden = 0;
-			if (getms() < menuShown + GetDoubleClickTime()) {
-				App::wnd()->close();
-			}
-		} else {
-			QRect icon = App::wnd()->iconRect();
-			p.x = r.left - App::wnd()->deltaLeft() + icon.left();
-			p.y = r.top - App::wnd()->deltaTop() + icon.top() + icon.height();
-			App::wnd()->psUpdateSysMenu(App::wnd()->windowHandle()->windowState());
-			menuShown = getms();
-			menuHidden = 0;
-			TrackPopupMenu(App::wnd()->psMenu(), TPM_LEFTALIGN | TPM_TOPALIGN | TPM_LEFTBUTTON, p.x, p.y, 0, hWnd, 0);
-			menuHidden = getms();
-		}
-		return true;
-		};
-	} return false;
-
-	case WM_NCLBUTTONDBLCLK: {
-		POINTS p = MAKEPOINTS(lParam);
-		RECT r;
-		GetWindowRect(hWnd, &r);
-		HitTestType res = App::wnd()->hitTest(QPoint(p.x - r.left + App::wnd()->deltaLeft(), p.y - r.top + App::wnd()->deltaTop()));
-		switch (res) {
-		case HitTestIcon: App::wnd()->close(); return true;
-		};
-	} return false;
-
 	case WM_SYSCOMMAND: {
 		if (wParam == SC_MOUSEMENU) {
 			POINTS p = MAKEPOINTS(lParam);
-			App::wnd()->psUpdateSysMenu(App::wnd()->windowHandle()->windowState());
+			App::wnd()->updateSystemMenu(App::wnd()->windowHandle()->windowState());
 			TrackPopupMenu(App::wnd()->psMenu(), TPM_LEFTALIGN | TPM_TOPALIGN | TPM_LEFTBUTTON, p.x, p.y, 0, hWnd, 0);
 		}
 	} return false;

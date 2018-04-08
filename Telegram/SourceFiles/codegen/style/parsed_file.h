@@ -1,33 +1,25 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
 #include <memory>
 #include <string>
+#include <functional>
+#include <QImage>
 #include "codegen/common/basic_tokenized_file.h"
 #include "codegen/style/options.h"
 #include "codegen/style/module.h"
 
 namespace codegen {
 namespace style {
+
+using Modifier = std::function<void(QImage &png100x, QImage &png200x)>;
+Modifier GetModifier(const QString &name);
 
 // Parses an input file to the internal struct.
 class ParsedFile {
@@ -44,7 +36,6 @@ public:
 	}
 
 private:
-
 	bool failed() const {
 		return failed_ || file_.failed();
 	}
@@ -88,10 +79,7 @@ private:
 	structure::Value readStringValue();
 	structure::Value readColorValue();
 	structure::Value readPointValue();
-	structure::Value readSpriteValue();
 	structure::Value readSizeValue();
-	structure::Value readTransitionValue();
-	structure::Value readCursorValue();
 	structure::Value readAlignValue();
 	structure::Value readMarginsValue();
 	structure::Value readFontValue();
@@ -127,10 +115,7 @@ private:
 		{ "string"    , { structure::TypeTag::String } },
 		{ "color"     , { structure::TypeTag::Color } },
 		{ "point"     , { structure::TypeTag::Point } },
-		{ "sprite"    , { structure::TypeTag::Sprite } },
 		{ "size"      , { structure::TypeTag::Size } },
-		{ "transition", { structure::TypeTag::Transition } },
-		{ "cursor"    , { structure::TypeTag::Cursor } },
 		{ "align"     , { structure::TypeTag::Align } },
 		{ "margins"   , { structure::TypeTag::Margins } },
 		{ "font"      , { structure::TypeTag::Font } },

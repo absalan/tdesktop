@@ -1,66 +1,54 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-static constexpr TextSelection FullSelection = { 0xFFFF, 0xFFFF };
+#include "base/runtime_composer.h"
 
-extern TextParseOptions _textNameOptions, _textDlgOptions;
-extern TextParseOptions _historyTextOptions, _historyBotOptions, _historyTextNoMonoOptions, _historyBotNoMonoOptions;
+namespace HistoryView {
+struct TextState;
+struct StateRequest;
+} // namespace HistoryView
 
-const TextParseOptions &itemTextOptions(History *h, PeerData *f);
-const TextParseOptions &itemTextNoMonoOptions(History *h, PeerData *f);
+constexpr auto FullSelection = TextSelection { 0xFFFF, 0xFFFF };
 
-enum RoundCorners {
-	NoneCorners = 0x00, // for images
-	BlackCorners,
-	WhiteCorners,
-	ServiceCorners,
-	ServiceSelectedCorners,
-	SelectedOverlayCorners,
-	DateCorners,
-	DateSelectedCorners,
-	ForwardCorners,
-	MediaviewSaveCorners,
-	EmojiHoverCorners,
-	StickerHoverCorners,
-	BotKeyboardCorners,
-	BotKeyboardOverCorners,
-	BotKeyboardDownCorners,
-	PhotoSelectOverlayCorners,
+inline bool IsSubGroupSelection(TextSelection selection) {
+	return (selection.from == 0xFFFF) && (selection.to != 0xFFFF);
+}
 
-	DocBlueCorners,
-	DocGreenCorners,
-	DocRedCorners,
-	DocYellowCorners,
+inline bool IsGroupItemSelection(
+		TextSelection selection,
+		int index) {
+	Expects(index >= 0 && index < 0x0F);
 
-	InShadowCorners, // for photos without bg
-	InSelectedShadowCorners,
+	return IsSubGroupSelection(selection) && (selection.to & (1 << index));
+}
 
-	MessageInCorners, // with shadow
-	MessageInSelectedCorners,
-	MessageOutCorners,
-	MessageOutSelectedCorners,
+[[nodiscard]] inline TextSelection AddGroupItemSelection(
+		TextSelection selection,
+		int index) {
+	Expects(index >= 0 && index < 0x0F);
 
-	RoundCornersCount
-};
+	const auto bit = uint16(1U << index);
+	return TextSelection(
+		0xFFFF,
+		IsSubGroupSelection(selection) ? (selection.to | bit) : bit);
+}
+
+[[nodiscard]] inline TextSelection RemoveGroupItemSelection(
+		TextSelection selection,
+		int index) {
+	Expects(index >= 0 && index < 0x0F);
+
+	const auto bit = uint16(1U << index);
+	return IsSubGroupSelection(selection)
+		? TextSelection(0xFFFF, selection.to & ~bit)
+		: selection;
+}
 
 static const int32 FileStatusSizeReady = 0x7FFFFFF0;
 static const int32 FileStatusSizeLoaded = 0x7FFFFFF1;
@@ -69,68 +57,71 @@ static const int32 FileStatusSizeFailed = 0x7FFFFFF2;
 QString formatSizeText(qint64 size);
 QString formatDownloadText(qint64 ready, qint64 total);
 QString formatDurationText(qint64 duration);
+QString formatDurationWords(qint64 duration);
 QString formatDurationAndSizeText(qint64 duration, qint64 size);
 QString formatGifAndSizeText(qint64 size);
 QString formatPlayedText(qint64 played, qint64 duration);
 
-QString documentName(DocumentData *document);
 int32 documentColorIndex(DocumentData *document, QString &ext);
-style::color documentColor(int32 colorIndex);
-style::color documentDarkColor(int32 colorIndex);
-style::color documentOverColor(int32 colorIndex);
-style::color documentSelectedColor(int32 colorIndex);
-style::sprite documentCorner(int32 colorIndex);
-RoundCorners documentCorners(int32 colorIndex);
+style::color documentColor(int colorIndex);
+style::color documentDarkColor(int colorIndex);
+style::color documentOverColor(int colorIndex);
+style::color documentSelectedColor(int colorIndex);
+RoundCorners documentCorners(int colorIndex);
+bool documentIsValidMediaFile(const QString &filepath);
+bool documentIsExecutableName(const QString &filename);
 
 class PaintContextBase {
 public:
-	PaintContextBase(uint64 ms, bool selecting) : ms(ms), selecting(selecting) {
+	PaintContextBase(TimeMs ms, bool selecting) : ms(ms), selecting(selecting) {
 	}
-	uint64 ms;
+	TimeMs ms;
 	bool selecting;
 
 };
 
-class LayoutItemBase : public Composer, public ClickHandlerHost {
+class LayoutItemBase
+	: public RuntimeComposer<LayoutItemBase>
+	, public ClickHandlerHost {
 public:
+	using TextState = HistoryView::TextState;
+	using StateRequest = HistoryView::StateRequest;
+
 	LayoutItemBase() {
 	}
 
 	LayoutItemBase(const LayoutItemBase &other) = delete;
 	LayoutItemBase &operator=(const LayoutItemBase &other) = delete;
 
-	int32 maxWidth() const {
+	int maxWidth() const {
 		return _maxw;
 	}
-	int32 minHeight() const {
+	int minHeight() const {
 		return _minh;
 	}
 	virtual void initDimensions() = 0;
-	virtual int32 resizeGetHeight(int32 width) {
+	virtual int resizeGetHeight(int width) {
 		_width = qMin(width, _maxw);
 		_height = _minh;
 		return _height;
 	}
 
-	virtual void getState(ClickHandlerPtr &link, HistoryCursorState &cursor, int x, int y) const {
-		link.clear();
-		cursor = HistoryDefaultCursorState;
-	}
-	virtual void getSymbol(uint16 &symbol, bool &after, bool &upon, int x, int y) const { // from text
-		upon = hasPoint(x, y);
-		symbol = upon ? 0xFFFF : 0;
-		after = false;
-	}
+	[[nodiscard]] virtual TextState getState(
+		QPoint point,
+		StateRequest request) const;
+	[[nodiscard]] virtual TextSelection adjustSelection(
+		TextSelection selection,
+		TextSelectType type) const;
 
-	int32 width() const {
+	int width() const {
 		return _width;
 	}
-	int32 height() const {
+	int height() const {
 		return _height;
 	}
 
-	bool hasPoint(int x, int y) const {
-		return (x >= 0 && y >= 0 && x < width() && y < height());
+	bool hasPoint(QPoint point) const {
+		return QRect(0, 0, width(), height()).contains(point);
 	}
 
 	virtual ~LayoutItemBase() {

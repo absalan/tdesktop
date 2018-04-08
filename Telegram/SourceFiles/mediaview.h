@@ -1,55 +1,56 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "dropdown.h"
+#include "ui/widgets/dropdown_menu.h"
+#include "ui/effects/radial_animation.h"
+#include "data/data_shared_media.h"
+#include "data/data_user_photos.h"
 
-class MediaView : public TWidget, public RPCSender, public ClickHandlerHost {
+namespace Media {
+namespace Player {
+struct TrackState;
+} // namespace Player
+namespace Clip {
+class Controller;
+} // namespace Clip
+namespace View {
+class GroupThumbs;
+} // namespace View
+} // namespace Media
+
+namespace Ui {
+class PopupMenu;
+class LinkButton;
+class RoundButton;
+} // namespace Ui
+
+namespace Window {
+namespace Theme {
+struct Preview;
+} // namespace Theme
+} // namespace Window
+
+namespace Notify {
+struct PeerUpdate;
+} // namespace Notify
+
+class MediaView : public TWidget, private base::Subscriber, public ClickHandlerHost {
 	Q_OBJECT
 
 public:
-
 	MediaView();
 
-	void paintEvent(QPaintEvent *e) override;
+	void setVisible(bool visible) override;
 
-	void keyPressEvent(QKeyEvent *e) override;
-	void mousePressEvent(QMouseEvent *e) override;
-	void mouseMoveEvent(QMouseEvent *e) override;
-	void mouseReleaseEvent(QMouseEvent *e) override;
-	void contextMenuEvent(QContextMenuEvent *e) override;
-	void touchEvent(QTouchEvent *e);
-
-	bool event(QEvent *e) override;
-
-	void hide();
-
-	void updateOver(QPoint mpos);
-
-	void showPhoto(PhotoData *photo, HistoryItem *context);
-	void showPhoto(PhotoData *photo, PeerData *context);
-	void showDocument(DocumentData *doc, HistoryItem *context);
-	void moveToScreen();
-	bool moveToNext(int32 delta);
-	void preloadData(int32 delta);
+	void showPhoto(not_null<PhotoData*> photo, HistoryItem *context);
+	void showPhoto(not_null<PhotoData*> photo, not_null<PeerData*> context);
+	void showDocument(not_null<DocumentData*> document, HistoryItem *context);
 
 	void leaveToChildEvent(QEvent *e, QWidget *child) override { // e -- from enterEvent() of child TWidget
 		updateOverState(OverNone);
@@ -58,21 +59,15 @@ public:
 		updateOver(mapFromGlobal(QCursor::pos()));
 	}
 
-	void mediaOverviewUpdated(PeerData *peer, MediaOverviewType type);
-	void documentUpdated(DocumentData *doc);
-	void changingMsgId(HistoryItem *row, MsgId newId);
-	void updateDocSize();
-	void updateControls();
-	void updateDropdown();
-
-	void showSaveMsgFile();
 	void close();
 
 	void activateControls();
 	void onDocClick();
 
-	void clipCallback(ClipReaderNotification notification);
+	void clipCallback(Media::Clip::Notification notification);
 	PeerData *ui_getPeerForMouseAction();
+
+	void clearData();
 
 	~MediaView();
 
@@ -80,10 +75,23 @@ public:
 	void clickHandlerActiveChanged(const ClickHandlerPtr &p, bool active) override;
 	void clickHandlerPressedChanged(const ClickHandlerPtr &p, bool pressed) override;
 
-public slots:
+protected:
+	void paintEvent(QPaintEvent *e) override;
 
+	void keyPressEvent(QKeyEvent *e) override;
+	void wheelEvent(QWheelEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
+	void mouseDoubleClickEvent(QMouseEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void mouseReleaseEvent(QMouseEvent *e) override;
+	void contextMenuEvent(QContextMenuEvent *e) override;
+	void touchEvent(QTouchEvent *e);
+
+	bool event(QEvent *e) override;
+	bool eventFilter(QObject *obj, QEvent *e) override;
+
+private slots:
 	void onHideControls(bool force = false);
-	void onDropdownHiding();
 
 	void onScreenResized(int screen);
 
@@ -101,119 +109,18 @@ public slots:
 
 	void onDropdown();
 
-	void onCheckActive();
 	void onTouchTimer();
 
 	void updateImage();
 
+	void onVideoPauseResume();
+	void onVideoSeekProgress(TimeMs positionMs);
+	void onVideoSeekFinished(TimeMs positionMs);
+	void onVideoVolumeChanged(float64 volume);
+	void onVideoToggleFullScreen();
+	void onVideoPlayProgress(const AudioMsgId &audioId);
+
 private:
-
-	void displayPhoto(PhotoData *photo, HistoryItem *item);
-	void displayDocument(DocumentData *doc, HistoryItem *item);
-	void findCurrent();
-	void loadBack();
-
-	// Radial animation interface.
-	float64 radialProgress() const;
-	bool radialLoading() const;
-	QRect radialRect() const;
-	void radialStart();
-	uint64 radialTimeShift() const;
-
-	// Computes the last OverviewChatPhotos PhotoData* from _history or _migrated.
-	struct LastChatPhoto {
-		HistoryItem *item;
-		PhotoData *photo;
-	};
-	LastChatPhoto computeLastOverviewChatPhoto();
-	void computeAdditionalChatPhoto(PeerData *peer, PhotoData *lastOverviewPhoto);
-
-	void userPhotosLoaded(UserData *u, const MTPphotos_Photos &photos, mtpRequestId req);
-
-	void deletePhotosDone(const MTPVector<MTPlong> &result);
-	bool deletePhotosFail(const RPCError &error);
-
-	void updateHeader();
-	void snapXY();
-
-	void step_state(uint64 ms, bool timer);
-	void step_radial(uint64 ms, bool timer);
-
-	QBrush _transparentBrush;
-
-	PhotoData *_photo = nullptr;
-	DocumentData *_doc = nullptr;
-	MediaOverviewType _overview = OverviewCount;
-	QRect _closeNav, _closeNavIcon;
-	QRect _leftNav, _leftNavIcon, _rightNav, _rightNavIcon;
-	QRect _headerNav, _nameNav, _dateNav;
-	QRect _saveNav, _saveNavIcon, _moreNav, _moreNavIcon;
-	bool _leftNavVisible = false;
-	bool _rightNavVisible = false;
-	bool _saveVisible = false;
-	bool _headerHasLink = false;
-	QString _dateText;
-	QString _headerText;
-
-	Text _caption;
-	QRect _captionRect;
-
-	uint64 _animStarted;
-
-	int _width = 0;
-	int _x = 0, _y = 0, _w = 0, _h = 0;
-	int _xStart = 0, _yStart = 0;
-	int _zoom = 0; // < 0 - out, 0 - none, > 0 - in
-	float64 _zoomToScreen = 0.; // for documents
-	QPoint _mStart;
-	bool _pressed = false;
-	int32 _dragging = 0;
-	QPixmap _current;
-	ClipReader *_gif = nullptr;
-	int32 _full = -1; // -1 - thumb, 0 - medium, 1 - full
-
-	bool fileShown() const;
-	bool gifShown() const;
-	void stopGif();
-
-	style::sprite _docIcon;
-	style::color _docIconColor;
-	QString _docName, _docSize, _docExt;
-	int _docNameWidth = 0, _docSizeWidth = 0, _docExtWidth = 0;
-	QRect _docRect, _docIconRect;
-	int _docThumbx = 0, _docThumby = 0, _docThumbw = 0;
-	LinkButton _docDownload, _docSaveAs, _docCancel;
-
-	QRect _photoRadialRect;
-	RadialAnimation _radial;
-
-	History *_migrated = nullptr;
-	History *_history = nullptr; // if conversation photos or files overview
-	PeerData *_peer = nullptr;
-	UserData *_user = nullptr; // if user profile photos overview
-
-	// There can be additional first photo in chat photos overview, that is not
-	// in the _history->overview[OverviewChatPhotos] (if the item was deleted).
-	PhotoData *_additionalChatPhoto = nullptr;
-
-	// We save the information about the reason of the current mediaview show:
-	// did we open a peer profile photo or a photo from some message.
-	// We use it when trying to delete a photo: if we've opened a peer photo,
-	// then we'll delete group photo instead of the corresponding message.
-	bool _firstOpenedPeerPhoto = false;
-
-	PeerData *_from = nullptr;
-	Text _fromName;
-
-	int _index = -1; // index in photos or files array, -1 if just photo
-	MsgId _msgid = 0; // msgId of current photo or file
-	bool _msgmigrated = false; // msgId is from _migrated history
-	ChannelId _channel = NoChannel;
-	bool _canForward = false;
-	bool _canDelete = false;
-
-	mtpRequestId _loadRequest = 0;
-
 	enum OverState {
 		OverNone,
 		OverLeftNav,
@@ -225,13 +132,219 @@ private:
 		OverSave,
 		OverMore,
 		OverIcon,
+		OverVideo,
 	};
+
+	void updateOver(QPoint mpos);
+	void moveToScreen();
+	bool moveToNext(int delta);
+	void preloadData(int delta);
+	struct Entity {
+		base::optional_variant<
+			not_null<PhotoData*>,
+			not_null<DocumentData*>> data;
+		HistoryItem *item;
+	};
+	Entity entityForUserPhotos(int index) const;
+	Entity entityForSharedMedia(int index) const;
+	Entity entityByIndex(int index) const;
+	Entity entityForItemId(const FullMsgId &itemId) const;
+	bool moveToEntity(const Entity &entity, int preloadDelta = 0);
+	void setContext(base::optional_variant<
+		not_null<HistoryItem*>,
+		not_null<PeerData*>> context);
+
+	void refreshLang();
+	void showSaveMsgFile();
+	void updateMixerVideoVolume() const;
+
+	struct SharedMedia;
+	using SharedMediaType = SharedMediaWithLastSlice::Type;
+	using SharedMediaKey = SharedMediaWithLastSlice::Key;
+	base::optional<SharedMediaType> sharedMediaType() const;
+	base::optional<SharedMediaKey> sharedMediaKey() const;
+	base::optional<SharedMediaType> computeOverviewType() const;
+	bool validSharedMedia() const;
+	void validateSharedMedia();
+	void handleSharedMediaUpdate(SharedMediaWithLastSlice &&update);
+
+	struct UserPhotos;
+	using UserPhotosKey = UserPhotosSlice::Key;
+	base::optional<UserPhotosKey> userPhotosKey() const;
+	bool validUserPhotos() const;
+	void validateUserPhotos();
+	void handleUserPhotosUpdate(UserPhotosSlice &&update);
+
+	void refreshCaption(HistoryItem *item);
+	void refreshMediaViewer();
+	void refreshNavVisibility();
+	void refreshGroupThumbs();
+
+	void dropdownHidden();
+	void updateDocSize();
+	void updateControls();
+	void updateActions();
+	void resizeCenteredControls();
+
+	void displayPhoto(not_null<PhotoData*> photo, HistoryItem *item);
+	void displayDocument(DocumentData *document, HistoryItem *item);
+	void displayFinished();
+	void findCurrent();
+
+	void updateCursor();
+	void setZoomLevel(int newZoom);
+
+	void updateVideoPlaybackState(const Media::Player::TrackState &state);
+	void updateSilentVideoPlaybackState();
+	void restartVideoAtSeekPosition(TimeMs positionMs);
+	void toggleVideoPaused();
+
+	void createClipController();
+	void refreshClipControllerGeometry();
+	void refreshCaptionGeometry();
+
+	void initAnimation();
+	void createClipReader();
+	Images::Options videoThumbOptions() const;
+
+	void initThemePreview();
+	void destroyThemePreview();
+	void updateThemePreviewGeometry();
+
+	void documentUpdated(DocumentData *doc);
+	void changingMsgId(not_null<HistoryItem*> row, MsgId newId);
+
+	// Radial animation interface.
+	float64 radialProgress() const;
+	bool radialLoading() const;
+	QRect radialRect() const;
+	void radialStart();
+	TimeMs radialTimeShift() const;
+
+	void updateHeader();
+	void snapXY();
+
+	void step_state(TimeMs ms, bool timer);
+	void step_radial(TimeMs ms, bool timer);
+
+	void zoomIn();
+	void zoomOut();
+	void zoomReset();
+	void zoomUpdate(int32 &newZoom);
+
+	void paintDocRadialLoading(Painter &p, bool radial, float64 radialOpacity);
+	void paintThemePreview(Painter &p, QRect clip);
+
+	void updateOverRect(OverState state);
+	bool updateOverState(OverState newState);
+	float64 overLevel(OverState control) const;
+
+	void checkGroupThumbsAnimation();
+	void initGroupThumbs();
+
+	QBrush _transparentBrush;
+
+	PhotoData *_photo = nullptr;
+	DocumentData *_doc = nullptr;
+	std::unique_ptr<SharedMedia> _sharedMedia;
+	base::optional<SharedMediaWithLastSlice> _sharedMediaData;
+	base::optional<SharedMediaWithLastSlice::Key> _sharedMediaDataKey;
+	std::unique_ptr<UserPhotos> _userPhotos;
+	base::optional<UserPhotosSlice> _userPhotosData;
+
+	QRect _closeNav, _closeNavIcon;
+	QRect _leftNav, _leftNavIcon, _rightNav, _rightNavIcon;
+	QRect _headerNav, _nameNav, _dateNav;
+	QRect _saveNav, _saveNavIcon, _moreNav, _moreNavIcon;
+	bool _leftNavVisible = false;
+	bool _rightNavVisible = false;
+	bool _saveVisible = false;
+	bool _headerHasLink = false;
+	QString _dateText;
+	QString _headerText;
+
+	object_ptr<Media::Clip::Controller> _clipController = { nullptr };
+	DocumentData *_autoplayVideoDocument = nullptr;
+	bool _fullScreenVideo = false;
+	int _fullScreenZoomCache = 0;
+
+	std::unique_ptr<Media::View::GroupThumbs> _groupThumbs;
+	QRect _groupThumbsRect;
+	int _groupThumbsAvailableWidth = 0;
+	int _groupThumbsLeft = 0;
+	int _groupThumbsTop = 0;
+	Text _caption;
+	QRect _captionRect;
+
+	TimeMs _animStarted;
+
+	int _width = 0;
+	int _x = 0, _y = 0, _w = 0, _h = 0;
+	int _xStart = 0, _yStart = 0;
+	int _zoom = 0; // < 0 - out, 0 - none, > 0 - in
+	float64 _zoomToScreen = 0.; // for documents
+	QPoint _mStart;
+	bool _pressed = false;
+	int32 _dragging = 0;
+	QPixmap _current;
+	Media::Clip::ReaderPointer _gif;
+	int32 _full = -1; // -1 - thumb, 0 - medium, 1 - full
+
+	// Video without audio stream playback information.
+	bool _videoIsSilent = false;
+	bool _videoPaused = false;
+	bool _videoStopped = false;
+	TimeMs _videoPositionMs = 0;
+	TimeMs _videoDurationMs = 0;
+	int32 _videoFrequencyMs = 1000; // 1000 ms per second.
+
+	bool fileShown() const;
+	bool gifShown() const;
+	bool fileBubbleShown() const;
+	void stopGif();
+
+	const style::icon *_docIcon = nullptr;
+	style::color _docIconColor;
+	QString _docName, _docSize, _docExt;
+	int _docNameWidth = 0, _docSizeWidth = 0, _docExtWidth = 0;
+	QRect _docRect, _docIconRect;
+	int _docThumbx = 0, _docThumby = 0, _docThumbw = 0;
+	object_ptr<Ui::LinkButton> _docDownload;
+	object_ptr<Ui::LinkButton> _docSaveAs;
+	object_ptr<Ui::LinkButton> _docCancel;
+
+	QRect _photoRadialRect;
+	Ui::RadialAnimation _radial;
+
+	History *_migrated = nullptr;
+	History *_history = nullptr; // if conversation photos or files overview
+	PeerData *_peer = nullptr;
+	UserData *_user = nullptr; // if user profile photos overview
+
+	// We save the information about the reason of the current mediaview show:
+	// did we open a peer profile photo or a photo from some message.
+	// We use it when trying to delete a photo: if we've opened a peer photo,
+	// then we'll delete group photo instead of the corresponding message.
+	bool _firstOpenedPeerPhoto = false;
+
+	PeerData *_from = nullptr;
+	Text _fromName;
+
+	base::optional<int> _index; // Index in current _sharedMedia data.
+	base::optional<int> _fullIndex; // Index in full shared media.
+	base::optional<int> _fullCount;
+	FullMsgId _msgid;
+	bool _canForwardItem = false;
+	bool _canDeleteItem = false;
+
+	mtpRequestId _loadRequest = 0;
+
 	OverState _over = OverNone;
 	OverState _down = OverNone;
 	QPoint _lastAction, _lastMouseMovePos;
 	bool _ignoringDropdown = false;
 
-	Animation _a_state;
+	BasicAnimation _a_state;
 
 	enum ControlsState {
 		ControlsShowing,
@@ -240,14 +353,20 @@ private:
 		ControlsHidden,
 	};
 	ControlsState _controlsState = ControlsShown;
-	uint64 _controlsAnimStarted = 0;
+	TimeMs _controlsAnimStarted = 0;
 	QTimer _controlsHideTimer;
-	anim::fvalue a_cOpacity;
+	anim::value a_cOpacity;
+	bool _mousePressed = false;
 
-	PopupMenu *_menu = nullptr;
-	Dropdown _dropdown;
-	IconedButton *_btnSaveCancel, *_btnToMessage, *_btnShowInFolder, *_btnSaveAs, *_btnCopy, *_btnForward, *_btnDelete, *_btnViewAll;
-	QList<IconedButton*> _btns;
+	Ui::PopupMenu *_menu = nullptr;
+	object_ptr<Ui::DropdownMenu> _dropdown;
+	object_ptr<QTimer> _dropdownShowTimer;
+
+	struct ActionData {
+		QString text;
+		const char *member;
+	};
+	QList<ActionData> _actions;
 
 	bool _receiveMouse = true;
 
@@ -257,20 +376,24 @@ private:
 	QPoint _accumScroll;
 
 	QString _saveMsgFilename;
-	uint64 _saveMsgStarted = 0;
-	anim::fvalue _saveMsgOpacity = { 0 };
+	TimeMs _saveMsgStarted = 0;
+	anim::value _saveMsgOpacity;
 	QRect _saveMsg;
 	QTimer _saveMsgUpdater;
 	Text _saveMsgText;
 
-	typedef QMap<OverState, uint64> Showing;
+	typedef QMap<OverState, TimeMs> Showing;
 	Showing _animations;
-	typedef QMap<OverState, anim::fvalue> ShowingOpacities;
+	typedef QMap<OverState, anim::value> ShowingOpacities;
 	ShowingOpacities _animOpacities;
 
-	void updateOverRect(OverState state);
-	bool updateOverState(OverState newState);
-	float64 overLevel(OverState control);
-	QColor overColor(const QColor &a, float64 ca, const QColor &b, float64 cb);
+	int _verticalWheelDelta = 0;
+
+	bool _themePreviewShown = false;
+	uint64 _themePreviewId = 0;
+	QRect _themePreviewRect;
+	std::unique_ptr<Window::Theme::Preview> _themePreview;
+	object_ptr<Ui::RoundButton> _themeApply = { nullptr };
+	object_ptr<Ui::RoundButton> _themeCancel = { nullptr };
 
 };

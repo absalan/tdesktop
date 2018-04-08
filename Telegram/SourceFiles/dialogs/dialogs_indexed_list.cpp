@@ -1,132 +1,168 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#include "stdafx.h"
 #include "dialogs/dialogs_indexed_list.h"
+
+#include "auth_session.h"
+#include "data/data_session.h"
+#include "history/history.h"
 
 namespace Dialogs {
 
 IndexedList::IndexedList(SortMode sortMode)
 : _sortMode(sortMode)
-, _list(sortMode) {
+, _list(sortMode)
+, _empty(sortMode) {
 }
 
-RowsByLetter IndexedList::addToEnd(History *history) {
+RowsByLetter IndexedList::addToEnd(Key key) {
 	RowsByLetter result;
-	if (!_list.contains(history->peer->id)) {
-		result.insert(0, _list.addToEnd(history));
-		for_const (auto ch, history->peer->chars) {
+	if (!_list.contains(key)) {
+		result.emplace(0, _list.addToEnd(key));
+		for (auto ch : key.entry()->chatsListFirstLetters()) {
 			auto j = _index.find(ch);
 			if (j == _index.cend()) {
-				j = _index.insert(ch, new List(_sortMode));
+				j = _index.emplace(
+					ch,
+					std::make_unique<List>(_sortMode)).first;
 			}
-			result.insert(ch, j.value()->addToEnd(history));
+			result.emplace(ch, j->second->addToEnd(key));
 		}
 	}
 	return result;
 }
 
-Row *IndexedList::addByName(History *history) {
-	if (auto row = _list.getRow(history->peer->id)) {
+Row *IndexedList::addByName(Key key) {
+	if (const auto row = _list.getRow(key)) {
 		return row;
 	}
 
-	Row *result = _list.addByName(history);
-	for_const (auto ch, history->peer->chars) {
+	Row *result = _list.addByName(key);
+	for (auto ch : key.entry()->chatsListFirstLetters()) {
 		auto j = _index.find(ch);
 		if (j == _index.cend()) {
-			j = _index.insert(ch, new List(_sortMode));
+			j = _index.emplace(
+				ch,
+				std::make_unique<List>(_sortMode)).first;
 		}
-		j.value()->addByName(history);
+		j->second->addByName(key);
 	}
 	return result;
 }
 
 void IndexedList::adjustByPos(const RowsByLetter &links) {
-	for (auto i = links.cbegin(), e = links.cend(); i != e; ++i) {
-		if (i.key() == QChar(0)) {
-			_list.adjustByPos(i.value());
+	for (auto [ch, row] : links) {
+		if (ch == QChar(0)) {
+			_list.adjustByPos(row);
 		} else {
-			if (auto list = _index.value(i.key())) {
-				list->adjustByPos(i.value());
+			if (auto it = _index.find(ch); it != _index.cend()) {
+				it->second->adjustByPos(row);
 			}
 		}
 	}
 }
 
-void IndexedList::peerNameChanged(PeerData *peer, const PeerData::Names &oldNames, const PeerData::NameFirstChars &oldChars) {
-	t_assert(_sortMode != SortMode::Date);
-	if (_sortMode == SortMode::Name) {
-		adjustByName(peer, oldNames, oldChars);
-	} else {
-		adjustNames(Dialogs::Mode::All, peer, oldNames, oldChars);
+void IndexedList::moveToTop(Key key) {
+	if (_list.moveToTop(key)) {
+		for (auto ch : key.entry()->chatsListFirstLetters()) {
+			if (auto it = _index.find(ch); it != _index.cend()) {
+				it->second->moveToTop(key);
+			}
+		}
 	}
 }
 
-void IndexedList::peerNameChanged(Mode list, PeerData *peer, const PeerData::Names &oldNames, const PeerData::NameFirstChars &oldChars) {
-	t_assert(_sortMode == SortMode::Date);
-	adjustNames(list, peer, oldNames, oldChars);
+void IndexedList::movePinned(Row *row, int deltaSign) {
+	auto swapPinnedIndexWith = find(row);
+	Assert(swapPinnedIndexWith != cend());
+	if (deltaSign > 0) {
+		++swapPinnedIndexWith;
+	} else {
+		Assert(swapPinnedIndexWith != cbegin());
+		--swapPinnedIndexWith;
+	}
+	Auth().data().reorderTwoPinnedDialogs(
+		row->key(),
+		(*swapPinnedIndexWith)->key());
 }
 
-void IndexedList::adjustByName(PeerData *peer, const PeerData::Names &oldNames, const PeerData::NameFirstChars &oldChars) {
-	Row *mainRow = _list.adjustByName(peer);
+void IndexedList::peerNameChanged(
+		not_null<PeerData*> peer,
+		const base::flat_set<QChar> &oldLetters) {
+	Expects(_sortMode != SortMode::Date);
+
+	if (const auto history = App::historyLoaded(peer)) {
+		if (_sortMode == SortMode::Name) {
+			adjustByName(history, oldLetters);
+		} else {
+			adjustNames(Dialogs::Mode::All, history, oldLetters);
+		}
+	}
+}
+
+void IndexedList::peerNameChanged(
+		Mode list,
+		not_null<PeerData*> peer,
+		const base::flat_set<QChar> &oldLetters) {
+	Expects(_sortMode == SortMode::Date);
+
+	if (const auto history = App::historyLoaded(peer)) {
+		adjustNames(list, history, oldLetters);
+	}
+}
+
+void IndexedList::adjustByName(
+		Key key,
+		const base::flat_set<QChar> &oldLetters) {
+	const auto mainRow = _list.adjustByName(key);
 	if (!mainRow) return;
 
-	History *history = mainRow->history();
-
-	PeerData::NameFirstChars toRemove = oldChars, toAdd;
-	for_const (auto ch, peer->chars) {
+	auto toRemove = oldLetters;
+	auto toAdd = base::flat_set<QChar>();
+	for (auto ch : key.entry()->chatsListFirstLetters()) {
 		auto j = toRemove.find(ch);
 		if (j == toRemove.cend()) {
 			toAdd.insert(ch);
 		} else {
 			toRemove.erase(j);
-			if (auto list = _index.value(ch)) {
-				list->adjustByName(peer);
+			if (auto it = _index.find(ch); it != _index.cend()) {
+				it->second->adjustByName(key);
 			}
 		}
 	}
-	for_const (auto ch, toRemove) {
-		if (auto list = _index.value(ch)) {
-			list->del(peer->id, mainRow);
+	for (auto ch : toRemove) {
+		if (auto it = _index.find(ch); it != _index.cend()) {
+			it->second->del(key, mainRow);
 		}
 	}
-	if (!toAdd.isEmpty()) {
-		for_const (auto ch, toAdd) {
+	if (!toAdd.empty()) {
+		for (auto ch : toAdd) {
 			auto j = _index.find(ch);
 			if (j == _index.cend()) {
-				j = _index.insert(ch, new List(_sortMode));
+				j = _index.emplace(
+					ch,
+					std::make_unique<List>(_sortMode)).first;
 			}
-			j.value()->addByName(history);
+			j->second->addByName(key);
 		}
 	}
 }
 
-void IndexedList::adjustNames(Mode list, PeerData *peer, const PeerData::Names &oldNames, const PeerData::NameFirstChars &oldChars) {
-	auto mainRow = _list.getRow(peer->id);
+void IndexedList::adjustNames(
+		Mode list,
+		not_null<History*> history,
+		const base::flat_set<QChar> &oldLetters) {
+	const auto key = Dialogs::Key(history);
+	auto mainRow = _list.getRow(key);
 	if (!mainRow) return;
 
-	History *history = mainRow->history();
-
-	PeerData::NameFirstChars toRemove = oldChars, toAdd;
-	for_const (auto ch, peer->chars) {
+	auto toRemove = oldLetters;
+	auto toAdd = base::flat_set<QChar>();
+	for (auto ch : key.entry()->chatsListFirstLetters()) {
 		auto j = toRemove.find(ch);
 		if (j == toRemove.cend()) {
 			toAdd.insert(ch);
@@ -134,40 +170,40 @@ void IndexedList::adjustNames(Mode list, PeerData *peer, const PeerData::Names &
 			toRemove.erase(j);
 		}
 	}
-	for_const (auto ch, toRemove) {
+	for (auto ch : toRemove) {
 		if (_sortMode == SortMode::Date) {
 			history->removeChatListEntryByLetter(list, ch);
 		}
-		if (auto list = _index.value(ch)) {
-			list->del(peer->id, mainRow);
+		if (auto it = _index.find(ch); it != _index.cend()) {
+			it->second->del(key, mainRow);
 		}
 	}
-	for_const (auto ch, toAdd) {
+	for (auto ch : toAdd) {
 		auto j = _index.find(ch);
 		if (j == _index.cend()) {
-			j = _index.insert(ch, new List(_sortMode));
+			j = _index.emplace(
+				ch,
+				std::make_unique<List>(_sortMode)).first;
 		}
-		Row *row = j.value()->addToEnd(history);
+		auto row = j->second->addToEnd(key);
 		if (_sortMode == SortMode::Date) {
 			history->addChatListEntryByLetter(list, ch, row);
 		}
 	}
 }
 
-void IndexedList::del(const PeerData *peer, Row *replacedBy) {
-	if (_list.del(peer->id, replacedBy)) {
-		for_const (auto ch, peer->chars) {
-			if (auto list = _index.value(ch)) {
-				list->del(peer->id, replacedBy);
+void IndexedList::del(Key key, Row *replacedBy) {
+	if (_list.del(key, replacedBy)) {
+		for (auto ch : key.entry()->chatsListFirstLetters()) {
+			if (auto it = _index.find(ch); it != _index.cend()) {
+				it->second->del(key, replacedBy);
 			}
 		}
 	}
 }
 
 void IndexedList::clear() {
-	for_const (auto &list, _index) {
-		delete list;
-	}
+	_index.clear();
 }
 
 IndexedList::~IndexedList() {

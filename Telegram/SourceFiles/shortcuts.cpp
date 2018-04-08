@@ -1,65 +1,43 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#include "stdafx.h"
 #include "shortcuts.h"
 
 #include "mainwindow.h"
 #include "passcodewidget.h"
 #include "mainwidget.h"
-#include "playerwidget.h"
+#include "messenger.h"
+#include "media/player/media_player_instance.h"
+#include "platform/platform_specific.h"
+#include "base/parse_helper.h"
 
 namespace ShortcutCommands {
 
-typedef void(*Handler)();
+using Handler = bool(*)();
 
-void lock_telegram() {
-	if (auto w = App::wnd()) {
-		if (App::passcoded()) {
-			w->passcodeWidget()->onSubmit();
-		} else if (cHasPasscode()) {
-			w->setupPasscode(true);
-		}
+bool lock_telegram() {
+	if (!App::passcoded() && Global::LocalPasscode()) {
+		Messenger::Instance().setupPasscode();
+		return true;
 	}
+	return false;
 }
 
-void minimize_telegram() {
-	if (auto w = App::wnd()) {
-		if (cWorkMode() == dbiwmTrayOnly) {
-			w->minimizeToTray();
-		} else {
-			w->setWindowState(Qt::WindowMinimized);
-		}
-	}
+bool minimize_telegram() {
+	return Messenger::Instance().minimizeActiveWindow();
 }
 
-void close_telegram() {
-	if (!Ui::hideWindowNoQuit()) {
-		if (auto w = App::wnd()) {
-			w->close();
-		}
-	}
+bool close_telegram() {
+	return Messenger::Instance().closeActiveWindow();
 }
 
-void quit_telegram() {
+bool quit_telegram() {
 	App::quit();
+	return true;
 }
 
 //void start_stop_recording() {
@@ -70,58 +48,55 @@ void quit_telegram() {
 
 //}
 
-void media_play() {
-	if (MainWidget *m = App::main()) {
-		m->player()->playPressed();
-	}
+bool media_play() {
+	Media::Player::instance()->play();
+	return true;
 }
 
-void media_pause() {
-	if (MainWidget *m = App::main()) {
-		m->player()->pausePressed();
-	}
+bool media_pause() {
+	Media::Player::instance()->pause(AudioMsgId::Type::Song);
+	return true;
 }
 
-void media_playpause() {
-	if (MainWidget *m = App::main()) {
-		m->player()->playPausePressed();
-	}
+bool media_playpause() {
+	Media::Player::instance()->playPause();
+	return true;
 }
 
-void media_stop() {
-	if (MainWidget *m = App::main()) {
-		m->player()->stopPressed();
-	}
+bool media_stop() {
+	Media::Player::instance()->stop();
+	return true;
 }
 
-void media_previous() {
-	if (MainWidget *m = App::main()) {
-		m->player()->prevPressed();
-	}
+bool media_previous() {
+	Media::Player::instance()->previous();
+	return true;
 }
 
-void media_next() {
-	if (MainWidget *m = App::main()) {
-		m->player()->nextPressed();
-	}
+bool media_next() {
+	Media::Player::instance()->next();
+	return true;
 }
 
-void search() {
-	if (MainWidget *m = App::main()) {
-		m->cmd_search();
+bool search() {
+	if (auto m = App::main()) {
+		return m->cmd_search();
 	}
+	return false;
 }
 
-void previous_chat() {
-	if (MainWidget *m = App::main()) {
-		m->cmd_previous_chat();
+bool previous_chat() {
+	if (auto m = App::main()) {
+		return m->cmd_previous_chat();
 	}
+	return false;
 }
 
-void next_chat() {
-	if (MainWidget *m = App::main()) {
-		m->cmd_next_chat();
+bool next_chat() {
+	if (auto m = App::main()) {
+		return m->cmd_next_chat();
 	}
+	return false;
 }
 
 // other commands here
@@ -133,76 +108,6 @@ inline bool qMapLessThanKey(const ShortcutCommands::Handler &a, const ShortcutCo
 }
 
 namespace Shortcuts {
-
-// inspired by https://github.com/sindresorhus/strip-json-comments
-QByteArray _stripJsonComments(const QByteArray &json) {
-	enum InsideComment {
-		InsideCommentNone,
-		InsideCommentSingleLine,
-		InsideCommentMultiLine,
-	};
-	InsideComment insideComment = InsideCommentNone;
-	bool insideString = false;
-
-	QByteArray result;
-
-	const char *b = json.cbegin(), *e = json.cend(), *offset = b;
-	for (const char *ch = offset; ch != e; ++ch) {
-		char currentChar = *ch;
-		char nextChar = (ch + 1 == e) ? 0 : *(ch + 1);
-
-		if (insideComment == InsideCommentNone && currentChar == '"') {
-			bool escaped = ((ch > b) && *(ch - 1) == '\\') && ((ch - 1 < b) || *(ch - 2) != '\\');
-			if (!escaped) {
-				insideString = !insideString;
-			}
-		}
-
-		if (insideString) {
-			continue;
-		}
-
-		if (insideComment == InsideCommentNone && currentChar == '/' && nextChar == '/') {
-			if (ch > offset) {
-				if (result.isEmpty()) result.reserve(json.size() - 2);
-				result.append(offset, ch - offset);
-				offset = ch;
-			}
-			insideComment = InsideCommentSingleLine;
-			++ch;
-		} else if (insideComment == InsideCommentSingleLine && currentChar == '\r' && nextChar == '\n') {
-			if (ch > offset) {
-				offset = ch;
-			}
-			++ch;
-			insideComment = InsideCommentNone;
-		} else if (insideComment == InsideCommentSingleLine && currentChar == '\n') {
-			if (ch > offset) {
-				offset = ch;
-			}
-			insideComment = InsideCommentNone;
-		} else if (insideComment == InsideCommentNone && currentChar == '/' && nextChar == '*') {
-			if (ch > offset) {
-				if (result.isEmpty()) result.reserve(json.size() - 2);
-				result.append(offset, ch - offset);
-				offset = ch;
-			}
-			insideComment = InsideCommentMultiLine;
-			++ch;
-		} else if (insideComment == InsideCommentMultiLine && currentChar == '*' && nextChar == '/') {
-			if (ch > offset) {
-				offset = ch;
-			}
-			++ch;
-			insideComment = InsideCommentNone;
-		}
-	}
-
-	if (insideComment == InsideCommentNone && e > offset && !result.isEmpty()) {
-		result.append(offset, e - offset);
-	}
-	return result.isEmpty() ? json : result;
-}
 
 struct DataStruct;
 DataStruct *DataPtr = nullptr;
@@ -217,8 +122,24 @@ void destroyShortcut(QShortcut *shortcut);
 
 struct DataStruct {
 	DataStruct() {
-		t_assert(DataPtr == nullptr);
+		Assert(DataPtr == nullptr);
 		DataPtr = this;
+
+		if (autoRepeatCommands.isEmpty()) {
+			autoRepeatCommands.insert(qsl("media_previous"));
+			autoRepeatCommands.insert(qsl("media_next"));
+			autoRepeatCommands.insert(qsl("next_chat"));
+			autoRepeatCommands.insert(qsl("previous_chat"));
+		}
+
+		if (mediaCommands.isEmpty()) {
+			mediaCommands.insert(qsl("media_play"));
+			mediaCommands.insert(qsl("media_playpause"));
+			mediaCommands.insert(qsl("media_play"));
+			mediaCommands.insert(qsl("media_stop"));
+			mediaCommands.insert(qsl("media_previous"));
+			mediaCommands.insert(qsl("media_next"));
+		}
 
 #define DeclareAlias(keys, command) setShortcut(qsl(keys), qsl(#command))
 #define DeclareCommand(keys, command) createCommand(qsl(#command), ShortcutCommands::command); DeclareAlias(keys, command)
@@ -272,37 +193,24 @@ struct DataStruct {
 	QMap<int, ShortcutCommands::Handler> handlers;
 
 	QSet<QShortcut*> mediaShortcuts;
+	QSet<QString> autoRepeatCommands;
+	QSet<QString> mediaCommands;
 
-	QSet<QString> autoRepeatCommands = {
-		qsl("media_previous"),
-		qsl("media_next"),
-		qsl("next_chat"),
-		qsl("previous_chat"),
-	};
-
-	QSet<QString> mediaCommands = {
-		qsl("media_play"),
-		qsl("media_pause"),
-		qsl("media_playpause"),
-		qsl("media_stop"),
-		qsl("media_previous"),
-		qsl("media_next")
-	};
 };
 
 namespace {
 
 void createCommand(const QString &command, ShortcutCommands::Handler handler) {
-	t_assert(DataPtr != nullptr);
-	t_assert(!command.isEmpty());
+	Assert(DataPtr != nullptr);
+	Assert(!command.isEmpty());
 
 	DataPtr->commands.insert(command, handler);
 	DataPtr->commandnames.insert(handler, command);
 }
 
 QKeySequence setShortcut(const QString &keys, const QString &command) {
-	t_assert(DataPtr != nullptr);
-	t_assert(!command.isEmpty());
+	Assert(DataPtr != nullptr);
+	Assert(!command.isEmpty());
 	if (keys.isEmpty()) return QKeySequence();
 
 	QKeySequence seq(keys, QKeySequence::PortableText);
@@ -313,7 +221,7 @@ QKeySequence setShortcut(const QString &keys, const QString &command) {
 		if (it == DataPtr->commands.cend()) {
 			LOG(("Warning: could not find shortcut command handler '%1'").arg(command));
 		} else {
-			auto shortcut = std_::make_unique<QShortcut>(seq, App::wnd(), nullptr, nullptr, Qt::ApplicationShortcut);
+			auto shortcut = std::make_unique<QShortcut>(seq, Messenger::Instance().getActiveWindow(), nullptr, nullptr, Qt::ApplicationShortcut);
 			if (!DataPtr->autoRepeatCommands.contains(command)) {
 				shortcut->setAutoRepeat(false);
 			}
@@ -344,7 +252,7 @@ QKeySequence setShortcut(const QString &keys, const QString &command) {
 }
 
 QKeySequence removeShortcut(const QString &keys) {
-	t_assert(DataPtr != nullptr);
+	Assert(DataPtr != nullptr);
 	if (keys.isEmpty()) return QKeySequence();
 
 	QKeySequence seq(keys, QKeySequence::PortableText);
@@ -362,7 +270,7 @@ QKeySequence removeShortcut(const QString &keys) {
 }
 
 void destroyShortcut(QShortcut *shortcut) {
-	t_assert(DataPtr != nullptr);
+	Assert(DataPtr != nullptr);
 
 	DataPtr->handlers.remove(shortcut->id());
 	DataPtr->mediaShortcuts.remove(shortcut);
@@ -372,7 +280,7 @@ void destroyShortcut(QShortcut *shortcut) {
 } // namespace
 
 void start() {
-	t_assert(Global::started());
+	Assert(Global::started());
 
 	new DataStruct();
 
@@ -381,7 +289,7 @@ void start() {
 	QFile defaultFile(cWorkingDir() + qsl("tdata/shortcuts-default.json"));
 	if (defaultFile.open(QIODevice::ReadOnly)) {
 		QJsonParseError error = { 0, QJsonParseError::NoError };
-		QJsonDocument doc = QJsonDocument::fromJson(_stripJsonComments(defaultFile.readAll()), &error);
+		QJsonDocument doc = QJsonDocument::fromJson(base::parse::stripComments(defaultFile.readAll()), &error);
 		defaultFile.close();
 
 		if (error.error == QJsonParseError::NoError && doc.isArray()) {
@@ -432,7 +340,7 @@ void start() {
 	if (customFile.exists()) {
 		if (customFile.open(QIODevice::ReadOnly)) {
 			QJsonParseError error = { 0, QJsonParseError::NoError };
-			QJsonDocument doc = QJsonDocument::fromJson(_stripJsonComments(customFile.readAll()), &error);
+			QJsonDocument doc = QJsonDocument::fromJson(base::parse::stripComments(customFile.readAll()), &error);
 			customFile.close();
 
 			if (error.error != QJsonParseError::NoError) {
@@ -490,30 +398,28 @@ void start() {
 }
 
 const QStringList &errors() {
-	t_assert(DataPtr != nullptr);
+	Assert(DataPtr != nullptr);
 	return DataPtr->errors;
 }
 
 bool launch(int shortcutId) {
-	t_assert(DataPtr != nullptr);
+	Assert(DataPtr != nullptr);
 
 	auto it = DataPtr->handlers.constFind(shortcutId);
 	if (it == DataPtr->handlers.cend()) {
 		return false;
 	}
-	(*it.value())();
-	return true;
+	return (*it.value())();
 }
 
 bool launch(const QString &command) {
-	t_assert(DataPtr != nullptr);
+	Assert(DataPtr != nullptr);
 
 	auto it = DataPtr->commands.constFind(command);
 	if (it == DataPtr->commands.cend()) {
 		return false;
 	}
-	(*it.value())();
-	return true;
+	return (*it.value())();
 }
 
 void enableMediaShortcuts() {
@@ -521,6 +427,7 @@ void enableMediaShortcuts() {
 	for_const (auto shortcut, DataPtr->mediaShortcuts) {
 		shortcut->setEnabled(true);
 	}
+	Platform::SetWatchingMediaKeys(true);
 }
 
 void disableMediaShortcuts() {
@@ -528,6 +435,7 @@ void disableMediaShortcuts() {
 	for_const (auto shortcut, DataPtr->mediaShortcuts) {
 		shortcut->setEnabled(false);
 	}
+	Platform::SetWatchingMediaKeys(false);
 }
 
 void finish() {

@@ -1,34 +1,35 @@
 /*
 This file is part of Telegram Desktop,
-the official desktop version of Telegram messaging app, see https://telegram.org
+the official desktop application for the Telegram messaging service.
 
-Telegram Desktop is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-It is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-In addition, as a special exception, the copyright holders give permission
-to link the code of portions of this program with the OpenSSL library.
-
-Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
 #include "layout.h"
 #include "core/click_handler_types.h"
+#include "ui/effects/radial_animation.h"
+#include "styles/style_overview.h"
+
+class HistoryMedia;
+
+namespace style {
+struct RoundCheckbox;
+} // namespace style
+
+namespace Data {
+class Media;
+} // namespace Data
 
 namespace Overview {
 namespace Layout {
 
+class Checkbox;
+
 class PaintContext : public PaintContextBase {
 public:
-	PaintContext(uint64 ms, bool selecting) : PaintContextBase(ms, selecting), isAfterDate(false) {
+	PaintContext(TimeMs ms, bool selecting) : PaintContextBase(ms, selecting), isAfterDate(false) {
 	}
 	bool isAfterDate;
 
@@ -37,8 +38,7 @@ public:
 class ItemBase;
 class AbstractItem : public LayoutItemBase {
 public:
-
-	virtual void paint(Painter &p, const QRect &clip, TextSelection selection, const PaintContext *context) const = 0;
+	virtual void paint(Painter &p, const QRect &clip, TextSelection selection, const PaintContext *context) = 0;
 
 	virtual ItemBase *toMediaItem() {
 		return nullptr;
@@ -53,70 +53,88 @@ public:
 	virtual DocumentData *getDocument() const {
 		return nullptr;
 	}
-	MsgId msgId() const {
-		const HistoryItem *item = getItem();
-		return item ? item->id : 0;
+	MsgId msgId() const;
+
+	virtual void invalidateCache() {
 	}
 
 };
 
 class ItemBase : public AbstractItem {
 public:
-	ItemBase(HistoryItem *parent) : _parent(parent) {
+	ItemBase(not_null<HistoryItem*> parent);
+
+	QDateTime dateTime() const;
+
+	void setPosition(int position) {
+		_position = position;
+	}
+	int position() const {
+		return _position;
 	}
 
-	ItemBase *toMediaItem() override {
+	ItemBase *toMediaItem() final override {
 		return this;
 	}
-	const ItemBase *toMediaItem() const override {
+	const ItemBase *toMediaItem() const final override {
 		return this;
 	}
-	HistoryItem *getItem() const override {
+	HistoryItem *getItem() const final override {
 		return _parent;
 	}
 
-	void clickHandlerActiveChanged(const ClickHandlerPtr &p, bool active) override;
-	void clickHandlerPressedChanged(const ClickHandlerPtr &p, bool active) override;
+	void clickHandlerActiveChanged(const ClickHandlerPtr &action, bool active) override;
+	void clickHandlerPressedChanged(const ClickHandlerPtr &action, bool pressed) override;
+
+	void invalidateCache() override;
+
+	~ItemBase();
 
 protected:
-	HistoryItem *_parent;
+	not_null<HistoryItem*> parent() const {
+		return _parent;
+	}
+	void paintCheckbox(
+		Painter &p,
+		QPoint position,
+		bool selected,
+		const PaintContext *context);
+	virtual const style::RoundCheckbox &checkboxStyle() const;
+
+private:
+	void ensureCheckboxCreated();
+
+	int _position = 0;
+	const not_null<HistoryItem*> _parent;
+	const QDateTime _dateTime;
+	std::unique_ptr<Checkbox> _check;
 
 };
 
 class RadialProgressItem : public ItemBase {
 public:
-	RadialProgressItem(HistoryItem *parent) : ItemBase(parent)
-		, _radial(0)
-		, a_iconOver(0, 0)
-		, _a_iconOver(animation(this, &RadialProgressItem::step_iconOver)) {
+	RadialProgressItem(not_null<HistoryItem*> parent) : ItemBase(parent) {
 	}
 	RadialProgressItem(const RadialProgressItem &other) = delete;
 
-	void clickHandlerActiveChanged(const ClickHandlerPtr &p, bool active) override;
-	void clickHandlerPressedChanged(const ClickHandlerPtr &p, bool active) override;
+	void clickHandlerActiveChanged(const ClickHandlerPtr &action, bool active) override;
 
 	~RadialProgressItem();
 
 protected:
 	ClickHandlerPtr _openl, _savel, _cancell;
-	void setLinks(ClickHandlerPtr &&openl, ClickHandlerPtr &&savel, ClickHandlerPtr &&cancell);
-	void setDocumentLinks(DocumentData *document) {
-		ClickHandlerPtr save;
-		if (document->voice()) {
-			save.reset(new DocumentOpenClickHandler(document));
-		} else {
-			save.reset(new DocumentSaveClickHandler(document));
-		}
-		setLinks(MakeShared<DocumentOpenClickHandler>(document), std_::move(save), MakeShared<DocumentCancelClickHandler>(document));
-	}
+	void setLinks(
+		ClickHandlerPtr &&openl,
+		ClickHandlerPtr &&savel,
+		ClickHandlerPtr &&cancell);
+	void setDocumentLinks(not_null<DocumentData*> document);
 
-	void step_iconOver(float64 ms, bool timer);
-	void step_radial(uint64 ms, bool timer);
+	void step_radial(TimeMs ms, bool timer);
 
-	void ensureRadial() const;
+	void ensureRadial();
 	void checkRadialFinished();
 
-	bool isRadialAnimation(uint64 ms) const {
+	bool isRadialAnimation(TimeMs ms) const {
 		if (!_radial || !_radial->animating()) return false;
 
 		_radial->step(ms);
@@ -130,32 +148,36 @@ protected:
 		return false;
 	}
 
-	mutable RadialAnimation *_radial;
-	anim::fvalue a_iconOver;
-	mutable Animation _a_iconOver;
+	std::unique_ptr<Ui::RadialAnimation> _radial;
+	Animation _a_iconOver;
 
 };
 
-class FileBase : public RadialProgressItem {
+class StatusText {
 public:
-	FileBase(HistoryItem *parent) : RadialProgressItem(parent) {
+	// duration = -1 - no duration, duration = -2 - "GIF" duration
+	void update(int newSize, int fullSize, int duration, TimeMs realDuration);
+	void setSize(int newSize);
+
+	int size() const {
+		return _size;
+	}
+	QString text() const {
+		return _text;
 	}
 
-protected:
-	// >= 0 will contain download / upload string, _statusSize = loaded bytes
-	// < 0 will contain played string, _statusSize = -(seconds + 1) played
+private:
+	// >= 0 will contain download / upload string, _size = loaded bytes
+	// < 0 will contain played string, _size = -(seconds + 1) played
 	// 0x7FFFFFF0 will contain status for not yet downloaded file
 	// 0x7FFFFFF1 will contain status for already downloaded file
 	// 0x7FFFFFF2 will contain status for failed to download / upload file
-	mutable int32 _statusSize;
-	mutable QString _statusText;
-
-	// duration = -1 - no duration, duration = -2 - "GIF" duration
-	void setStatusSize(int32 newSize, int32 fullSize, int32 duration, qint64 realDuration) const;
+	int _size = 0;
+	QString _text;
 
 };
 
-struct Info : public BaseComponent<Info> {
+struct Info : public RuntimeComponent<Info, LayoutItemBase> {
 	int top = 0;
 };
 
@@ -164,7 +186,7 @@ public:
 	Date(const QDate &date, bool month);
 
 	void initDimensions() override;
-	void paint(Painter &p, const QRect &clip, TextSelection selection, const PaintContext *context) const override;
+	void paint(Painter &p, const QRect &clip, TextSelection selection, const PaintContext *context) override;
 
 private:
 	QDate _date;
@@ -174,142 +196,151 @@ private:
 
 class Photo : public ItemBase {
 public:
-	Photo(PhotoData *photo, HistoryItem *parent);
+	Photo(
+		not_null<HistoryItem*> parent,
+		not_null<PhotoData*> photo);
 
 	void initDimensions() override;
 	int32 resizeGetHeight(int32 width) override;
-	void paint(Painter &p, const QRect &clip, TextSelection selection, const PaintContext *context) const override;
-	void getState(ClickHandlerPtr &link, HistoryCursorState &cursor, int x, int y) const override;
+	void paint(Painter &p, const QRect &clip, TextSelection selection, const PaintContext *context) override;
+	TextState getState(
+		QPoint point,
+		StateRequest request) const override;
 
 private:
-	PhotoData *_data;
+	not_null<PhotoData*> _data;
 	ClickHandlerPtr _link;
 
-	mutable QPixmap _pix;
-	mutable bool _goodLoaded;
+	QPixmap _pix;
+	bool _goodLoaded = false;
 
 };
 
-class Video : public FileBase {
+class Video : public RadialProgressItem {
 public:
-	Video(DocumentData *video, HistoryItem *parent);
+	Video(
+		not_null<HistoryItem*> parent,
+		not_null<DocumentData*> video);
 
 	void initDimensions() override;
 	int32 resizeGetHeight(int32 width) override;
-	void paint(Painter &p, const QRect &clip, TextSelection selection, const PaintContext *context) const override;
-	void getState(ClickHandlerPtr &link, HistoryCursorState &cursor, int x, int y) const override;
+	void paint(Painter &p, const QRect &clip, TextSelection selection, const PaintContext *context) override;
+	TextState getState(
+		QPoint point,
+		StateRequest request) const override;
 
 protected:
-	float64 dataProgress() const override {
-		return _data->progress();
-	}
-	bool dataFinished() const override {
-		return !_data->loading();
-	}
-	bool dataLoaded() const override {
-		return _data->loaded();
-	}
-	bool iconAnimated() const override {
-		return true;
-	}
+	float64 dataProgress() const override;
+	bool dataFinished() const override;
+	bool dataLoaded() const override;
+	bool iconAnimated() const override;
 
 private:
-	DocumentData *_data;
+	not_null<DocumentData*> _data;
+	StatusText _status;
 
 	QString _duration;
-	mutable QPixmap _pix;
-	mutable bool _thumbLoaded;
+	QPixmap _pix;
+	bool _thumbLoaded = false;
 
-	void updateStatusText() const;
+	void updateStatusText();
 
 };
 
-class Voice : public FileBase {
+class Voice : public RadialProgressItem {
 public:
-	Voice(DocumentData *voice, HistoryItem *parent);
+	Voice(
+		not_null<HistoryItem*> parent,
+		not_null<DocumentData*> voice,
+		const style::OverviewFileLayout &st);
 
 	void initDimensions() override;
-	void paint(Painter &p, const QRect &clip, TextSelection selection, const PaintContext *context) const override;
-	void getState(ClickHandlerPtr &link, HistoryCursorState &cursor, int x, int y) const override;
+	void paint(Painter &p, const QRect &clip, TextSelection selection, const PaintContext *context) override;
+	TextState getState(
+		QPoint point,
+		StateRequest request) const override;
 
 protected:
-	float64 dataProgress() const override {
-		return _data->progress();
-	}
-	bool dataFinished() const override {
-		return !_data->loading();
-	}
-	bool dataLoaded() const override {
-		return _data->loaded();
-	}
-	bool iconAnimated() const override {
-		return true;
-	}
+	float64 dataProgress() const override;
+	bool dataFinished() const override;
+	bool dataLoaded() const override;
+	bool iconAnimated() const override;
+	const style::RoundCheckbox &checkboxStyle() const override;
 
 private:
-	DocumentData *_data;
+	not_null<DocumentData*> _data;
+	StatusText _status;
 	ClickHandlerPtr _namel;
 
-	mutable Text _name, _details;
-	mutable int32 _nameVersion;
+	const style::OverviewFileLayout &_st;
 
-	void updateName() const;
-	bool updateStatusText() const;
+	Text _name, _details;
+	int _nameVersion;
+
+	void updateName();
+	bool updateStatusText();
 
 };
 
-class Document : public FileBase {
+class Document : public RadialProgressItem {
 public:
-	Document(DocumentData *document, HistoryItem *parent);
+	Document(
+		not_null<HistoryItem*> parent,
+		not_null<DocumentData*> document,
+		const style::OverviewFileLayout &st);
 
 	void initDimensions() override;
-	void paint(Painter &p, const QRect &clip, TextSelection selection, const PaintContext *context) const override;
-	void getState(ClickHandlerPtr &link, HistoryCursorState &cursor, int x, int y) const override;
+	void paint(Painter &p, const QRect &clip, TextSelection selection, const PaintContext *context) override;
+	TextState getState(
+		QPoint point,
+		StateRequest request) const override;
 
 	virtual DocumentData *getDocument() const override {
 		return _data;
 	}
 
 protected:
-	float64 dataProgress() const override {
-		return _data->progress();
-	}
-	bool dataFinished() const override {
-		return !_data->loading();
-	}
-	bool dataLoaded() const override {
-		return _data->loaded();
-	}
-	bool iconAnimated() const override {
-		return _data->song() || !_data->loaded() || (_radial && _radial->animating());
-	}
+	float64 dataProgress() const override;
+	bool dataFinished() const override;
+	bool dataLoaded() const override;
+	bool iconAnimated() const override;
+	const style::RoundCheckbox &checkboxStyle() const override;
 
 private:
-	DocumentData *_data;
+	not_null<DocumentData*> _data;
+	StatusText _status;
 	ClickHandlerPtr _msgl, _namel;
 
-	mutable bool _thumbForLoaded;
-	mutable QPixmap _thumb;
+	const style::OverviewFileLayout &_st;
 
-	QString _name, _date, _ext;
-	int32 _namew, _datew, _extw;
+	bool _thumbForLoaded = false;
+	QPixmap _thumb;
+
+	Text _name;
+	QString _date, _ext;
+	int32 _datew, _extw;
 	int32 _thumbw, _colorIndex;
 
-	bool withThumb() const {
-		return !_data->thumb->isNull() && _data->thumb->width() && _data->thumb->height();
-	}
-	bool updateStatusText() const;
+	bool withThumb() const;
+	bool updateStatusText();
 
 };
 
 class Link : public ItemBase {
 public:
-	Link(HistoryMedia *media, HistoryItem *parent);
+	Link(
+		not_null<HistoryItem*> parent,
+		Data::Media *media);
 
 	void initDimensions() override;
 	int32 resizeGetHeight(int32 width) override;
-	void paint(Painter &p, const QRect &clip, TextSelection selection, const PaintContext *context) const override;
-	void getState(ClickHandlerPtr &link, HistoryCursorState &cursor, int x, int y) const override;
+	void paint(Painter &p, const QRect &clip, TextSelection selection, const PaintContext *context) override;
+	TextState getState(
+		QPoint point,
+		StateRequest request) const override;
+
+protected:
+	const style::RoundCheckbox &checkboxStyle() const override;
 
 private:
 	ClickHandlerPtr _photol;
@@ -327,7 +358,7 @@ private:
 		LinkEntry(const QString &url, const QString &text);
 		QString text;
 		int32 width;
-		TextClickHandlerPtr lnk;
+		std::shared_ptr<TextClickHandler> lnk;
 	};
 	QVector<LinkEntry> _links;
 
